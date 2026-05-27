@@ -89,6 +89,21 @@ CREATE TABLE IF NOT EXISTS releases (
     UNIQUE(source, tag_name)
 );
 
+-- ── Activity log ─────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS activity_log (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT    NOT NULL,
+    category  TEXT    NOT NULL,          -- 'auth' | 'user' | 'scan' | 'admin' | 'system'
+    level     TEXT    NOT NULL DEFAULT 'info',  -- 'info' | 'warning' | 'error'
+    actor     TEXT    NOT NULL DEFAULT 'system',
+    action    TEXT    NOT NULL,
+    detail    TEXT    NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_log_timestamp ON activity_log(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_log_category  ON activity_log(category);
+CREATE INDEX IF NOT EXISTS idx_log_level     ON activity_log(level);
+
 -- ── Singleton scan-status row ─────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS scan_status (
     id          INTEGER PRIMARY KEY CHECK (id = 1),
@@ -428,3 +443,59 @@ def finish_scan(new_count: int, mod_count: int):
                WHERE id=1""",
             (now_iso(), new_count, mod_count),
         )
+
+
+# ── Activity log ───────────────────────────────────────────────────────────────
+
+def log_activity(
+    category: str,
+    action: str,
+    actor: str = "system",
+    detail: str = "",
+    level: str = "info",
+):
+    """
+    Append one row to the activity log.
+
+    category : 'auth' | 'user' | 'scan' | 'admin' | 'system'
+    level    : 'info' | 'warning' | 'error'
+    actor    : username, 'system', 'scheduler', etc.
+    """
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO activity_log (timestamp, category, level, actor, action, detail) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (now_iso(), category, level, actor, action, detail),
+        )
+
+
+def get_activity_log(
+    category: str = "",
+    level: str = "",
+    actor: str = "",
+    limit: int = 100,
+    offset: int = 0,
+) -> tuple[list[dict], int]:
+    """Return paginated activity log rows, newest first."""
+    conditions, params = [], []
+    if category:
+        conditions.append("category = ?")
+        params.append(category)
+    if level:
+        conditions.append("level = ?")
+        params.append(level)
+    if actor:
+        conditions.append("actor LIKE ?")
+        params.append(f"%{actor}%")
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    with get_conn() as conn:
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM activity_log {where}", params
+        ).fetchone()[0]
+        rows = conn.execute(
+            f"SELECT * FROM activity_log {where} "
+            f"ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        ).fetchall()
+    return [dict(r) for r in rows], total

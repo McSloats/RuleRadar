@@ -102,12 +102,12 @@ def admin_required(f):
 _STALE_MINUTES = 30
 
 
-def _maybe_trigger_scan():
+def _maybe_trigger_scan(triggered_by: str = "system"):
     """
     Start a background scan if:
       - no scan is currently running, AND
       - the last scan finished more than _STALE_MINUTES ago (or never ran).
-    Returns immediately.
+    Returns immediately; actual work happens in a daemon thread.
     """
     status = db.get_scan_status()
     if status.get("is_scanning"):
@@ -121,7 +121,7 @@ def _maybe_trigger_scan():
 
     def _run():
         try:
-            ruleradar.run_scan()
+            ruleradar.run_scan(triggered_by=triggered_by)
         except Exception as e:
             print(f"  Background scan error: {e}", flush=True)
 
@@ -161,6 +161,8 @@ def setup():
         else:
             pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
             db.create_user(username, pw_hash, is_admin=True)
+            db.log_activity("admin", f"Initial admin account '{username}' created",
+                            actor=username)
             flash("Admin account created — please log in.", "success")
             return redirect(url_for("login"))
 
@@ -180,8 +182,15 @@ def login():
         row      = db.get_user_by_username(username)
         if row and bcrypt.checkpw(password.encode(), row["password_hash"].encode()):
             login_user(User(row), remember=True)
+            db.log_activity("auth", f"User '{username}' logged in",
+                            actor=username,
+                            detail=f"ip={request.remote_addr}")
             next_page = request.args.get("next")
             return redirect(next_page or url_for("detections"))
+        db.log_activity("auth", f"Failed login attempt for '{username}'",
+                        actor=username or "unknown",
+                        detail=f"ip={request.remote_addr}",
+                        level="warning")
         flash("Invalid username or password.", "error")
 
     return render_template("login.html")
@@ -190,6 +199,8 @@ def login():
 @app.route("/logout")
 @login_required
 def logout():
+    db.log_activity("auth", f"User '{current_user.username}' logged out",
+                    actor=current_user.username)
     logout_user()
     return redirect(url_for("login"))
 
@@ -208,7 +219,7 @@ def index():
 @app.route("/detections")
 @login_required
 def detections():
-    _maybe_trigger_scan()
+    _maybe_trigger_scan(triggered_by=f"{current_user.username} (page load)")
     q        = request.args.get("q", "").strip()
     source   = request.args.get("source", "")
     page     = max(1, int(request.args.get("page", 1) or 1))
@@ -229,7 +240,7 @@ def detections():
 @app.route("/updates")
 @login_required
 def updates():
-    _maybe_trigger_scan()
+    _maybe_trigger_scan(triggered_by=f"{current_user.username} (page load)")
     source      = request.args.get("source", "")
     change_type = request.args.get("change_type", "")
     page        = max(1, int(request.args.get("page", 1) or 1))
@@ -275,6 +286,8 @@ def settings_password():
 
     row = db.get_user_by_id(current_user.id)
     if not bcrypt.checkpw(current_pw.encode(), row["password_hash"].encode()):
+        db.log_activity("user", "Failed password change — incorrect current password",
+                        actor=current_user.username, level="warning")
         flash("Current password is incorrect.", "error")
     elif new_pw != confirm:
         flash("New passwords do not match.", "error")
@@ -283,6 +296,8 @@ def settings_password():
     else:
         db.update_user_password(current_user.id,
                                 bcrypt.hashpw(new_pw.encode(), bcrypt.gensalt()).decode())
+        db.log_activity("user", "Password changed",
+                        actor=current_user.username)
         flash("Password updated successfully.", "success")
 
     return redirect(url_for("settings"))
@@ -293,6 +308,9 @@ def settings_password():
 def settings_discord():
     webhook = request.form.get("discord_webhook", "").strip()
     db.update_user_discord(current_user.id, webhook)
+    db.log_activity("user",
+                    "Discord webhook updated" if webhook else "Discord webhook cleared",
+                    actor=current_user.username)
     flash("Discord webhook saved.", "success")
     return redirect(url_for("settings"))
 
@@ -311,8 +329,12 @@ def settings_discord_test():
             f"✅ **RuleRadar** — test notification for **{current_user.username}**. "
             "Your webhook is working!"
         )
+        db.log_activity("user", "Discord webhook test sent",
+                        actor=current_user.username)
         flash("Test notification sent to Discord.", "success")
     except Exception as e:
+        db.log_activity("user", f"Discord webhook test failed: {e}",
+                        actor=current_user.username, level="error")
         flash(f"Failed to send test notification: {e}", "error")
     return redirect(url_for("settings"))
 
@@ -348,6 +370,9 @@ def settings_filters_add():
         "q":           q,
     })
     db.update_user_filters(current_user.id, json.dumps(filters))
+    db.log_activity("user", f"Saved filter '{name}' added",
+                    actor=current_user.username,
+                    detail=f"source={source or 'all'}, change_type={change_type or 'all'}, q={q or ''}")
     flash(f"Filter \"{name}\" saved.", "success")
     return redirect(url_for("settings"))
 
@@ -362,8 +387,12 @@ def settings_filters_delete():
     except (json.JSONDecodeError, TypeError):
         filters = []
 
-    filters = [f for f in filters if f.get("id") != filter_id]
+    removed = [f for f in filters if f.get("id") == filter_id]
+    filters  = [f for f in filters if f.get("id") != filter_id]
     db.update_user_filters(current_user.id, json.dumps(filters))
+    removed_name = removed[0].get("name", filter_id) if removed else filter_id
+    db.log_activity("user", f"Saved filter '{removed_name}' removed",
+                    actor=current_user.username)
     flash("Filter removed.", "success")
     return redirect(url_for("settings"))
 
@@ -392,6 +421,9 @@ def admin():
 def admin_config():
     token = request.form.get("github_token", "").strip()
     db.set_app_config("github_token", token)
+    db.log_activity("admin",
+                    "GitHub token updated" if token else "GitHub token cleared",
+                    actor=current_user.username)
     flash("GitHub token saved.", "success")
     return redirect(url_for("admin"))
 
@@ -415,6 +447,9 @@ def admin_add_user():
     else:
         pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
         db.create_user(username, pw_hash, is_admin=is_admin)
+        db.log_activity("admin", f"User '{username}' created",
+                        actor=current_user.username,
+                        detail=f"admin={is_admin}")
         flash(f"User \"{username}\" created.", "success")
 
     return redirect(url_for("admin"))
@@ -436,6 +471,8 @@ def admin_reset_password(user_id: int):
         pw_hash = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
         db.update_user_password(user_id, pw_hash)
         row = db.get_user_by_id(user_id)
+        db.log_activity("admin", f"Password reset for '{row['username']}'",
+                        actor=current_user.username)
         flash(f"Password reset for \"{row['username']}\".", "success")
 
     return redirect(url_for("admin"))
@@ -458,8 +495,10 @@ def admin_toggle_admin(user_id: int):
         return redirect(url_for("admin"))
 
     db.set_user_admin(user_id, not currently_admin)
-    action = "revoked" if currently_admin else "granted"
-    flash(f"Admin access {action} for \"{row['username']}\".", "success")
+    action = "revoked from" if currently_admin else "granted to"
+    db.log_activity("admin", f"Admin access {action} '{row['username']}'",
+                    actor=current_user.username)
+    flash(f"Admin access {'revoked' if currently_admin else 'granted'} for \"{row['username']}\".", "success")
     return redirect(url_for("admin"))
 
 
@@ -479,6 +518,8 @@ def admin_delete_user(user_id: int):
         return redirect(url_for("admin"))
 
     db.delete_user(user_id)
+    db.log_activity("admin", f"User '{row['username']}' deleted",
+                    actor=current_user.username)
     flash(f"User \"{row['username']}\" deleted.", "success")
     return redirect(url_for("admin"))
 
@@ -488,8 +529,32 @@ def admin_delete_user(user_id: int):
 @app.route("/api/scan/trigger", methods=["POST"])
 @login_required
 def api_scan_trigger():
-    _maybe_trigger_scan()
+    _maybe_trigger_scan(triggered_by=f"{current_user.username} (manual)")
     return jsonify({"queued": True})
+
+
+@app.route("/admin/activity")
+@admin_required
+def admin_activity():
+    category = request.args.get("category", "")
+    level    = request.args.get("level", "")
+    actor    = request.args.get("actor", "").strip()
+    page     = max(1, int(request.args.get("page", 1) or 1))
+    per_page = 100
+    offset   = (page - 1) * per_page
+
+    rows, total = db.get_activity_log(
+        category=category, level=level, actor=actor,
+        limit=per_page, offset=offset,
+    )
+    total_pages = max(1, (total + per_page - 1) // per_page)
+
+    return render_template(
+        "admin_activity.html",
+        rows=rows, total=total,
+        page=page, total_pages=total_pages,
+        category=category, level=level, actor=actor,
+    )
 
 
 @app.route("/api/scan/status")

@@ -278,7 +278,7 @@ def send_discord(webhook_url: str, message: str):
 
 # ── Main scan entry point ──────────────────────────────────────────────────────
 
-def run_scan() -> dict:
+def run_scan(triggered_by: str = "scheduler") -> dict:
     """
     Run a full scan cycle. Thread-safe — returns immediately if a scan is
     already in progress.
@@ -289,10 +289,15 @@ def run_scan() -> dict:
     GitHub token is read from the database (set via the admin panel).
     Discord notifications are sent to every user with a webhook configured.
 
+    triggered_by : free-text label recorded in the activity log
+                   (e.g. 'scheduler', 'alice (manual)', 'bob (page load)')
+
     Returns a summary dict: {new, modified, skipped, error}.
     """
     if not _scan_lock.acquire(blocking=False):
         print("  Scan already in progress — skipping.", flush=True)
+        db.log_activity("scan", "Scan skipped — already in progress",
+                        actor=triggered_by, level="warning")
         return {"skipped": True}
 
     try:
@@ -327,6 +332,10 @@ def run_scan() -> dict:
         print(f"[{timestamp}] Running RuleRadar (window: {hours}h)", flush=True)
         print(f"  Commits since {since_iso}", flush=True)
 
+        db.log_activity("scan", f"Scan started (window: {hours}h)",
+                        actor=triggered_by,
+                        detail=f"since={since_iso}")
+
         s_new, s_mod = scan_sigma(since_iso, token)
         p_new, p_mod = scan_splunk(since_iso, token)
 
@@ -353,6 +362,15 @@ def run_scan() -> dict:
             flush=True,
         )
 
+        db.log_activity(
+            "scan",
+            f"Scan complete — {total_new} new, {total_mod} modified",
+            actor=triggered_by,
+            detail=(f"sigma: {s_new} new / {s_mod} modified | "
+                    f"splunk: {p_new} new / {p_mod} modified"),
+            level="info" if (total_new + total_mod) > 0 else "info",
+        )
+
         # Send Discord notifications to every user who has a webhook configured
         if total_new + total_mod > 0:
             msg = (
@@ -369,6 +387,8 @@ def run_scan() -> dict:
 
     except Exception as e:
         print(f"  ERROR during scan: {e}", file=sys.stderr)
+        db.log_activity("scan", f"Scan error: {e}",
+                        actor=triggered_by, detail=str(e), level="error")
         db.finish_scan(0, 0)
         return {"error": str(e), "skipped": False}
 

@@ -21,7 +21,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 def run_job():
     print(">>> Scheduler: starting hourly RuleRadar scan…", flush=True)
-    result = ruleradar.run_scan()
+    result = ruleradar.run_scan(triggered_by="scheduler")
     if result.get("skipped"):
         print(">>> Scheduler: scan skipped (already in progress).", flush=True)
     elif result.get("error"):

@@ -1,0 +1,152 @@
+{% extends "layout.html" %}
+{% block title %}Activity Log — RuleRadar{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <a href="{{ url_for('admin') }}" class="btn btn-secondary btn-sm">← Admin</a>
+  <h2>Activity Log</h2>
+</div>
+
+{# ── Filters ───────────────────────────────────────────────────────────────── #}
+<form method="get" action="{{ url_for('admin_activity') }}" class="filter-form">
+  <select name="category">
+    <option value=""       {% if not category            %}selected{% endif %}>All Categories</option>
+    <option value="auth"   {% if category == 'auth'      %}selected{% endif %}>Auth</option>
+    <option value="user"   {% if category == 'user'      %}selected{% endif %}>User</option>
+    <option value="scan"   {% if category == 'scan'      %}selected{% endif %}>Scan</option>
+    <option value="admin"  {% if category == 'admin'     %}selected{% endif %}>Admin</option>
+    <option value="system" {% if category == 'system'    %}selected{% endif %}>System</option>
+  </select>
+  <select name="level">
+    <option value=""        {% if not level              %}selected{% endif %}>All Levels</option>
+    <option value="info"    {% if level == 'info'        %}selected{% endif %}>Info</option>
+    <option value="warning" {% if level == 'warning'     %}selected{% endif %}>Warning</option>
+    <option value="error"   {% if level == 'error'       %}selected{% endif %}>Error</option>
+  </select>
+  <input type="text" name="actor" value="{{ actor }}" placeholder="Filter by actor…"
+         style="min-width:180px;">
+  <button type="submit" class="btn btn-primary">Filter</button>
+  {% if category or level or actor %}
+    <a href="{{ url_for('admin_activity') }}" class="btn btn-secondary">Clear</a>
+  {% endif %}
+</form>
+
+<p class="result-count">
+  {{ total }} event{{ 's' if total != 1 else '' }}
+  {% if category %} in <strong>{{ category }}</strong>{% endif %}
+  {% if level %} at <strong>{{ level }}</strong> level{% endif %}
+  {% if actor %} by <strong>{{ actor }}</strong>{% endif %}
+</p>
+
+{# ── Log table ─────────────────────────────────────────────────────────────── #}
+{% if rows %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th style="width:155px;">Timestamp</th>
+        <th style="width:80px;">Category</th>
+        <th style="width:70px;">Level</th>
+        <th style="width:150px;">Actor</th>
+        <th>Action</th>
+        <th>Detail</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr style="{% if row.level == 'error' %}background:rgba(116,42,42,0.2);
+                 {% elif row.level == 'warning' %}background:rgba(123,52,30,0.2);
+                 {% endif %}">
+        <td class="nowrap text-muted text-small">
+          {{ row.timestamp[:19].replace('T', ' ') if row.timestamp else '—' }}
+        </td>
+        <td>
+          <span class="badge
+            {% if row.category == 'auth'   %}badge-sigma
+            {% elif row.category == 'scan' %}badge-new
+            {% elif row.category == 'admin'%}badge-admin
+            {% elif row.category == 'user' %}badge-splunk
+            {% else %}badge-user
+            {% endif %}">
+            {{ row.category }}
+          </span>
+        </td>
+        <td>
+          <span class="badge
+            {% if row.level == 'error'   %}badge-modified
+            {% elif row.level == 'warning' %}
+              " style="background:#7b6b14;color:#fefcbf
+            {% else %}badge-user
+            {% endif %}">
+            {{ row.level }}
+          </span>
+        </td>
+        <td class="text-small nowrap">{{ row.actor or '—' }}</td>
+        <td class="text-small">{{ row.action }}</td>
+        <td class="text-small text-muted">
+          {% if row.detail %}
+            {% if row.detail | length > 80 %}
+              <details style="display:inline;">
+                <summary style="cursor:pointer; color:#63b3ed; font-size:0.78rem; list-style:none;">
+                  {{ row.detail[:60] }}…
+                </summary>
+                <div style="margin-top:0.3rem; padding:0.4rem 0.6rem;
+                            background:#0f1117; border-radius:4px;
+                            font-family:monospace; font-size:0.75rem; color:#a0aec0;
+                            max-width:500px; word-break:break-all;">
+                  {{ row.detail }}
+                </div>
+              </details>
+            {% else %}
+              {{ row.detail }}
+            {% endif %}
+          {% else %}
+            —
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# ── Pagination ─────────────────────────────────────────────────────────────── #}
+{% if total_pages > 1 %}
+<div class="pagination">
+  <span class="pg-info">Page {{ page }} of {{ total_pages }}</span>
+
+  {% if page > 1 %}
+    <a href="{{ url_for('admin_activity', category=category, level=level, actor=actor, page=1) }}">«</a>
+    <a href="{{ url_for('admin_activity', category=category, level=level, actor=actor, page=page-1) }}">‹ Prev</a>
+  {% endif %}
+
+  {% set start_pg = [1, page - 2] | max %}
+  {% set end_pg   = [total_pages, page + 2] | min %}
+  {% for p in range(start_pg, end_pg + 1) %}
+    {% if p == page %}
+      <span class="pg-current">{{ p }}</span>
+    {% else %}
+      <a href="{{ url_for('admin_activity', category=category, level=level, actor=actor, page=p) }}">{{ p }}</a>
+    {% endif %}
+  {% endfor %}
+
+  {% if page < total_pages %}
+    <a href="{{ url_for('admin_activity', category=category, level=level, actor=actor, page=page+1) }}">Next ›</a>
+    <a href="{{ url_for('admin_activity', category=category, level=level, actor=actor, page=total_pages) }}">»</a>
+  {% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state">
+  <p>
+    {% if category or level or actor %}
+      No events match your filters.
+    {% else %}
+      No activity recorded yet.
+    {% endif %}
+  </p>
+</div>
+{% endif %}
+
+{% endblock %}
