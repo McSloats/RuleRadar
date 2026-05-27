@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Uninstalls the security monitor — removes the cron job, virtual environment,
+# Uninstalls RuleRadar — removes the cron job, virtual environment,
 # and optionally the entire project directory.
 set -euo pipefail
 
@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNNER="$SCRIPT_DIR/run_monitor.sh"
 
 echo "========================================"
-echo "  Security Monitor — Cleanup / Uninstall"
+echo "  RuleRadar — Cleanup / Uninstall"
 echo "========================================"
 echo ""
 

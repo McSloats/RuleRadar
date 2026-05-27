@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run once to install dependencies and register the 8 AM ET daily cron job.
+# Run once to install RuleRadar dependencies and register the 8 AM ET daily cron job.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
