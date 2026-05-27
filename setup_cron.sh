@@ -12,11 +12,7 @@ source "$SCRIPT_DIR/.venv/bin/activate"
 
 echo ">>> Installing dependencies..."
 pip install --upgrade pip --quiet
-pip install pyyaml --quiet
-
-# Optional: enables automatic Sigma → SPL conversion in reports.
-# Uncomment to install:
-# pip install pySigma-backend-splunk --quiet
+pip install pyyaml pySigma-backend-splunk --quiet
 
 deactivate
 echo ">>> Dependencies installed."
