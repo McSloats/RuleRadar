@@ -22,7 +22,7 @@
       height: 52px;
       display: flex;
       align-items: center;
-      gap: 1.5rem;
+      gap: 1.25rem;
       position: sticky;
       top: 0;
       z-index: 100;
@@ -40,11 +40,12 @@
       text-decoration: none;
       padding: 0.3rem 0.6rem;
       border-radius: 5px;
-      font-size: 0.9rem;
+      font-size: 0.875rem;
       transition: background 0.15s, color 0.15s;
     }
     .nav-link:hover { color: #e2e8f0; background: #2d3748; }
     .nav-link.active { color: #e2e8f0; background: #2d3748; }
+    .nav-divider { width: 1px; height: 20px; background: #2d3748; }
     .nav-spacer { flex: 1; }
     .nav-user {
       font-size: 0.8rem;
@@ -60,6 +61,15 @@
       border: 1px solid #2d3748;
     }
     .nav-logout:hover { background: #2d3748; color: #e2e8f0; }
+    .nav-admin-badge {
+      font-size: 0.7rem;
+      background: #2c5282;
+      color: #90cdf4;
+      padding: 0.1rem 0.4rem;
+      border-radius: 4px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
 
     /* ── Scan status badge ── */
     #scan-badge {
@@ -76,21 +86,13 @@
       border-radius: 50%;
       background: currentColor;
       display: inline-block;
+      flex-shrink: 0;
     }
-    #scan-badge.scanning .dot {
-      animation: pulse-dot 1s ease-in-out infinite;
-    }
-    @keyframes pulse-dot {
-      0%, 100% { opacity: 1; }
-      50%       { opacity: 0.3; }
-    }
+    #scan-badge.scanning .dot { animation: pulse-dot 1s ease-in-out infinite; }
+    @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.3} }
 
     /* ── Main content ── */
-    main {
-      max-width: 1440px;
-      margin: 0 auto;
-      padding: 1.5rem 1.5rem;
-    }
+    main { max-width: 1440px; margin: 0 auto; padding: 1.5rem; }
 
     /* ── Flash messages ── */
     .flash {
@@ -102,7 +104,7 @@
     .flash.error   { background: #742a2a; color: #fc8181; border: 1px solid #9b2c2c; }
     .flash.success { background: #1c4532; color: #68d391; border: 1px solid #276749; }
 
-    /* ── Page header row ── */
+    /* ── Page header ── */
     .page-header {
       display: flex;
       align-items: center;
@@ -112,17 +114,45 @@
     }
     .page-header h2 { font-size: 1.15rem; font-weight: 600; }
 
-    /* ── Filter form ── */
-    .filter-form {
-      display: flex;
-      gap: 0.6rem;
-      flex-wrap: wrap;
-      align-items: center;
-      margin-bottom: 1rem;
-      padding: 0.75rem 1rem;
+    /* ── Cards ── */
+    .card {
       background: #161b27;
       border: 1px solid #2d3748;
       border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .card-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #e2e8f0;
+      margin-bottom: 1.1rem;
+      padding-bottom: 0.6rem;
+      border-bottom: 1px solid #2d3748;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    /* ── Form elements ── */
+    .form-group { margin-bottom: 0.9rem; }
+    .form-group label {
+      display: block;
+      font-size: 0.8rem;
+      color: #a0aec0;
+      margin-bottom: 0.3rem;
+      font-weight: 500;
+    }
+    .form-group .hint {
+      font-size: 0.75rem;
+      color: #718096;
+      margin-top: 0.25rem;
+    }
+    .form-row {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      align-items: flex-end;
     }
     input[type="text"],
     input[type="password"],
@@ -138,10 +168,11 @@
     }
     input[type="text"]:focus,
     input[type="password"]:focus,
-    select:focus {
-      border-color: #63b3ed;
-    }
-    input[type="text"] { min-width: 260px; }
+    select:focus { border-color: #63b3ed; }
+    input[type="text"].wide,
+    input[type="password"].wide { width: 100%; }
+    select.wide { width: 100%; }
+    .filter-form input[type="text"] { min-width: 260px; }
 
     /* ── Buttons ── */
     .btn {
@@ -154,29 +185,66 @@
       border: none;
       text-decoration: none;
       transition: background 0.15s;
+      white-space: nowrap;
     }
-    .btn-primary { background: #2b6cb0; color: #fff; }
+    .btn-primary   { background: #2b6cb0; color: #fff; }
     .btn-primary:hover { background: #2c5282; }
     .btn-secondary { background: #2d3748; color: #e2e8f0; }
     .btn-secondary:hover { background: #4a5568; }
-    .btn-scan { background: #285e61; color: #81e6d9; margin-left: auto; }
+    .btn-danger    { background: #742a2a; color: #fc8181; }
+    .btn-danger:hover { background: #9b2c2c; }
+    .btn-scan      { background: #285e61; color: #81e6d9; margin-left: auto; }
     .btn-scan:hover { background: #234e52; }
     .btn-scan:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn-full { width: 100%; text-align: center; }
+    .btn-sm { padding: 0.3rem 0.65rem; font-size: 0.8rem; }
+
+    /* ── Filter form bar ── */
+    .filter-form {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 1rem;
+      padding: 0.75rem 1rem;
+      background: #161b27;
+      border: 1px solid #2d3748;
+      border-radius: 8px;
+    }
+
+    /* ── Saved filter presets ── */
+    .filter-presets {
+      display: flex;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+      margin-bottom: 0.75rem;
+      align-items: center;
+    }
+    .filter-presets .preset-label {
+      font-size: 0.75rem;
+      color: #718096;
+      margin-right: 0.25rem;
+    }
+    .preset-btn {
+      display: inline-block;
+      padding: 0.2rem 0.65rem;
+      border-radius: 9999px;
+      font-size: 0.78rem;
+      background: #1a2d42;
+      color: #90cdf4;
+      border: 1px solid #2a4365;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.15s;
+    }
+    .preset-btn:hover { background: #2a4365; color: #bee3f8; }
 
     /* ── Result count ── */
-    .result-count {
-      font-size: 0.8rem;
-      color: #718096;
-      margin-bottom: 0.75rem;
-    }
+    .result-count { font-size: 0.8rem; color: #718096; margin-bottom: 0.75rem; }
 
     /* ── Table ── */
     .table-wrap { overflow-x: auto; }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.85rem;
-    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
     thead th {
       background: #161b27;
       color: #718096;
@@ -188,12 +256,9 @@
       text-align: left;
       border-bottom: 1px solid #2d3748;
       position: sticky;
-      top: 52px;  /* below navbar */
+      top: 52px;
     }
-    tbody tr.data-row {
-      cursor: pointer;
-      transition: background 0.1s;
-    }
+    tbody tr.data-row { cursor: pointer; transition: background 0.1s; }
     tbody tr.data-row:hover td { background: #161b27; }
     tbody td {
       padding: 0.6rem 0.75rem;
@@ -206,6 +271,8 @@
       border-bottom: 1px solid #2d3748;
       padding: 0.75rem 1rem 0.75rem 2.5rem;
     }
+    /* Non-clickable table rows (admin/settings) */
+    table.static-table tbody tr:hover td { background: #161b27; }
     .expand-arrow { color: #4a5568; font-size: 0.65rem; user-select: none; }
 
     /* ── Badges ── */
@@ -217,12 +284,14 @@
       font-weight: 600;
       white-space: nowrap;
     }
-    .badge-sigma  { background: #1a365d; color: #90cdf4; }
-    .badge-splunk { background: #322659; color: #d6bcfa; }
+    .badge-sigma    { background: #1a365d; color: #90cdf4; }
+    .badge-splunk   { background: #322659; color: #d6bcfa; }
     .badge-new      { background: #1c4532; color: #68d391; }
     .badge-modified { background: #7b341e; color: #fbd38d; }
+    .badge-admin    { background: #2c5282; color: #90cdf4; }
+    .badge-user     { background: #2d3748; color: #a0aec0; }
 
-    /* ── Detail content ── */
+    /* ── Detail expand ── */
     .detail-label {
       font-size: 0.75rem;
       font-weight: 600;
@@ -243,11 +312,7 @@
       word-break: break-word;
       overflow-x: auto;
     }
-    .detail-text {
-      font-size: 0.83rem;
-      color: #718096;
-      line-height: 1.5;
-    }
+    .detail-text { font-size: 0.83rem; color: #718096; line-height: 1.5; }
 
     /* ── Pagination ── */
     .pagination {
@@ -258,8 +323,7 @@
       flex-wrap: wrap;
     }
     .pagination .pg-info { font-size: 0.8rem; color: #718096; margin-right: 0.4rem; }
-    .pagination a,
-    .pagination span.pg-current {
+    .pagination a, .pagination span.pg-current {
       display: inline-block;
       padding: 0.3rem 0.65rem;
       border-radius: 5px;
@@ -271,11 +335,7 @@
     .pagination span.pg-current { background: #2b6cb0; color: #fff; border: 1px solid #2b6cb0; }
 
     /* ── Empty state ── */
-    .empty-state {
-      text-align: center;
-      padding: 4rem 1rem;
-      color: #4a5568;
-    }
+    .empty-state { text-align: center; padding: 4rem 1rem; color: #4a5568; }
     .empty-state p { font-size: 0.9rem; }
 
     /* ── Auth pages ── */
@@ -287,34 +347,38 @@
       border-radius: 10px;
       padding: 2rem;
     }
-    .auth-card h1 {
-      font-size: 1.25rem;
-      margin-bottom: 0.4rem;
-      color: #63b3ed;
-    }
-    .auth-card .subtitle {
-      font-size: 0.85rem;
-      color: #718096;
-      margin-bottom: 1.75rem;
-    }
-    .form-field { margin-bottom: 1.1rem; }
-    .form-field label {
-      display: block;
+    .auth-card h1 { font-size: 1.25rem; margin-bottom: 0.4rem; color: #63b3ed; }
+    .auth-card .subtitle { font-size: 0.85rem; color: #718096; margin-bottom: 1.75rem; }
+
+    /* ── Reset-password inline section ── */
+    details.inline-action summary {
       font-size: 0.8rem;
-      color: #a0aec0;
-      margin-bottom: 0.35rem;
-      font-weight: 500;
+      color: #63b3ed;
+      cursor: pointer;
+      list-style: none;
+      display: inline-block;
     }
-    .form-field input { width: 100%; }
-    .btn-full { width: 100%; justify-content: center; padding: 0.6rem; }
+    details.inline-action summary::-webkit-details-marker { display: none; }
+    details.inline-action summary:hover { color: #90cdf4; }
+    details.inline-action .detail-body {
+      margin-top: 0.6rem;
+      padding: 0.75rem;
+      background: #0f1117;
+      border: 1px solid #2d3748;
+      border-radius: 6px;
+    }
 
     /* ── Misc ── */
     a { color: #63b3ed; }
     a:hover { color: #90cdf4; }
-    .text-muted { color: #718096; }
-    .text-small { font-size: 0.8rem; }
-    .nowrap { white-space: nowrap; }
-    .trunc { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .text-muted  { color: #718096; }
+    .text-small  { font-size: 0.8rem; }
+    .text-danger { color: #fc8181; }
+    .text-success{ color: #68d391; }
+    .nowrap      { white-space: nowrap; }
+    .trunc       { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .gap-1       { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+    hr.divider   { border: none; border-top: 1px solid #2d3748; margin: 1.25rem 0; }
   </style>
 </head>
 <body>
@@ -326,9 +390,22 @@
      href="{{ url_for('detections') }}">Detections</a>
   <a class="nav-link {% if request.endpoint == 'updates' %}active{% endif %}"
      href="{{ url_for('updates') }}">Updates</a>
+
+  <span class="nav-divider"></span>
+
+  <a class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}"
+     href="{{ url_for('settings') }}">Settings</a>
+  {% if current_user.is_admin %}
+  <a class="nav-link {% if request.endpoint == 'admin' %}active{% endif %}"
+     href="{{ url_for('admin') }}">Admin</a>
+  {% endif %}
+
   <span class="nav-spacer"></span>
   <span id="scan-badge"><span class="dot"></span><span id="scan-text">Loading…</span></span>
-  <span class="nav-user">{{ current_user.username }}</span>
+  <span class="nav-user">
+    {{ current_user.username }}
+    {% if current_user.is_admin %}<span class="nav-admin-badge">admin</span>{% endif %}
+  </span>
   <a class="nav-logout" href="{{ url_for('logout') }}">Log out</a>
 </nav>
 {% endif %}
@@ -337,13 +414,11 @@
   {% for category, message in get_flashed_messages(with_categories=True) %}
     <div class="flash {{ category }}">{{ message }}</div>
   {% endfor %}
-
   {% block content %}{% endblock %}
 </main>
 
 {% if current_user.is_authenticated %}
 <script>
-// ── Scan status badge ──────────────────────────────────────────────────────────
 async function refreshScanBadge() {
   try {
     const res  = await fetch('/api/scan/status');
@@ -355,17 +430,13 @@ async function refreshScanBadge() {
       text.textContent = 'Scanning…';
     } else {
       badge.className = '';
-      if (data.last_scan) {
-        const d = new Date(data.last_scan);
-        text.textContent = 'Last scan: ' + d.toLocaleString();
-      } else {
-        text.textContent = 'No scan yet';
-      }
+      text.textContent = data.last_scan
+        ? 'Last scan: ' + new Date(data.last_scan).toLocaleString()
+        : 'No scan yet';
     }
   } catch (_) {}
 }
 
-// ── Trigger a scan on page open (non-blocking; honours 30-min throttle) ───────
 async function triggerPageScan() {
   try { await fetch('/api/scan/trigger', { method: 'POST' }); } catch (_) {}
 }

@@ -1,0 +1,178 @@
+{% extends "layout.html" %}
+{% block title %}Admin — RuleRadar{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>Administration</h2>
+</div>
+
+{# ═══ GitHub Configuration ═════════════════════════════════════════════════════ #}
+<div class="card">
+  <div class="card-title">⚙️ GitHub Configuration</div>
+  <p class="text-muted text-small" style="margin-bottom:1rem;">
+    A GitHub personal access token raises the API rate limit from 60 to 5,000 requests/hour.
+    Both monitored repos are public, so this is optional — leave blank to scan unauthenticated.
+    Required scope: <code style="background:#0f1117; padding:0.1rem 0.3rem; border-radius:3px; font-size:0.78rem;">public_repo</code>
+    (classic token) or <code style="background:#0f1117; padding:0.1rem 0.3rem; border-radius:3px; font-size:0.78rem;">Contents: Read</code>
+    (fine-grained token).
+  </p>
+  <form method="post" action="{{ url_for('admin_config') }}" style="max-width:560px;">
+    <div class="form-group">
+      <label>GitHub Token</label>
+      <div style="display:flex; gap:0.5rem; align-items:center;">
+        <input type="password" id="gh-token-input" name="github_token"
+               class="wide" value="{{ github_token }}"
+               placeholder="ghp_… or github_pat_… (leave blank for unauthenticated)"
+               autocomplete="off">
+        <button type="button" class="btn btn-secondary btn-sm"
+                onclick="toggleTokenVisibility()">Show</button>
+      </div>
+      {% if token_display %}
+      <p class="hint text-success">✓ Token set: {{ token_display }}</p>
+      {% else %}
+      <p class="hint text-muted">No token — unauthenticated (60 req/hour)</p>
+      {% endif %}
+    </div>
+    <button type="submit" class="btn btn-primary">Save Token</button>
+  </form>
+</div>
+
+{# ═══ User Management ══════════════════════════════════════════════════════════ #}
+<div class="card">
+  <div class="card-title">👥 Users</div>
+
+  {# Users table #}
+  <div class="table-wrap" style="margin-bottom:1.5rem;">
+    <table class="static-table">
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th style="width:80px;">Role</th>
+          <th style="width:110px;">Discord</th>
+          <th style="width:160px;">Created</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in users %}
+        <tr>
+          <td>
+            <strong>{{ user.username }}</strong>
+            {% if user.id == current_user_id %}
+              <span class="text-muted text-small">(you)</span>
+            {% endif %}
+          </td>
+          <td>
+            <span class="badge {% if user.is_admin %}badge-admin{% else %}badge-user{% endif %}">
+              {{ 'admin' if user.is_admin else 'user' }}
+            </span>
+          </td>
+          <td>
+            {% if user.discord_webhook %}
+              <span class="text-success text-small">✓ set</span>
+            {% else %}
+              <span class="text-muted text-small">not set</span>
+            {% endif %}
+          </td>
+          <td class="text-muted text-small nowrap">
+            {{ user.created_at[:10] if user.created_at else '—' }}
+          </td>
+          <td>
+            <div class="gap-1">
+
+              {# Toggle admin #}
+              {% if user.id != current_user_id %}
+              <form method="post"
+                    action="{{ url_for('admin_toggle_admin', user_id=user.id) }}"
+                    style="display:inline;"
+                    onsubmit="return confirm('Change admin status for {{ user.username }}?');">
+                <button type="submit" class="btn btn-secondary btn-sm">
+                  {{ 'Revoke admin' if user.is_admin else 'Make admin' }}
+                </button>
+              </form>
+              {% endif %}
+
+              {# Reset password (inline expand) #}
+              <details class="inline-action">
+                <summary>Reset password</summary>
+                <div class="detail-body">
+                  <form method="post"
+                        action="{{ url_for('admin_reset_password', user_id=user.id) }}">
+                    <div class="form-group" style="margin-bottom:0.5rem;">
+                      <label>New password</label>
+                      <input type="password" name="new_password"
+                             class="wide" required minlength="8"
+                             autocomplete="new-password">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0.75rem;">
+                      <label>Confirm</label>
+                      <input type="password" name="confirm"
+                             class="wide" required minlength="8"
+                             autocomplete="new-password">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm">Reset</button>
+                  </form>
+                </div>
+              </details>
+
+              {# Delete user #}
+              {% if user.id != current_user_id %}
+              <form method="post"
+                    action="{{ url_for('admin_delete_user', user_id=user.id) }}"
+                    style="display:inline;"
+                    onsubmit="return confirm('Permanently delete user {{ user.username }}? This cannot be undone.');">
+                <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+              </form>
+              {% endif %}
+
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {# Add user form #}
+  <hr class="divider">
+  <p style="font-size:0.85rem; font-weight:600; margin-bottom:0.75rem;">Add New User</p>
+  <form method="post" action="{{ url_for('admin_add_user') }}" style="max-width:460px;">
+    <div class="form-group">
+      <label>Username</label>
+      <input type="text" name="username" class="wide" required autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label>Password <span class="text-muted">(min 8 characters)</span></label>
+      <input type="password" name="password" class="wide" required minlength="8"
+             autocomplete="new-password">
+    </div>
+    <div class="form-group">
+      <label>Confirm Password</label>
+      <input type="password" name="confirm" class="wide" required minlength="8"
+             autocomplete="new-password">
+    </div>
+    <div class="form-group" style="display:flex; align-items:center; gap:0.5rem; margin-bottom:1rem;">
+      <input type="checkbox" name="is_admin" id="new-is-admin"
+             style="width:auto; cursor:pointer;">
+      <label for="new-is-admin" style="margin:0; cursor:pointer; color:#e2e8f0;">
+        Grant admin access
+      </label>
+    </div>
+    <button type="submit" class="btn btn-primary">Create User</button>
+  </form>
+</div>
+
+<script>
+function toggleTokenVisibility() {
+  const input = document.getElementById('gh-token-input');
+  const btn   = event.target;
+  if (input.type === 'password') {
+    input.type = 'text';
+    btn.textContent = 'Hide';
+  } else {
+    input.type = 'password';
+    btn.textContent = 'Show';
+  }
+}
+</script>
+{% endblock %}

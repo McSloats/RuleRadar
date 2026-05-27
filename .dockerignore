@@ -10,10 +10,10 @@ __pycache__/
 *.pyc
 *.pyo
 
-# Runtime / generated files
-monitor_log.txt
+# Runtime / generated files (stored in the named volume at runtime)
 ruleradar.db
 .secret_key
+monitor_log.txt
 
-# Secrets — config.json is mounted at runtime, never baked in
+# config.json is no longer used — settings live in the database
 config.json

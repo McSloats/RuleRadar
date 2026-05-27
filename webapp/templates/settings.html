@@ -1,0 +1,158 @@
+{% extends "layout.html" %}
+{% block title %}Settings — RuleRadar{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h2>Settings</h2>
+</div>
+
+{# ═══ Change Password ══════════════════════════════════════════════════════════ #}
+<div class="card">
+  <div class="card-title">🔒 Change Password</div>
+  <form method="post" action="{{ url_for('settings_password') }}" style="max-width:400px;">
+    <div class="form-group">
+      <label>Current Password</label>
+      <input type="password" name="current_password" class="wide" autocomplete="current-password" required>
+    </div>
+    <div class="form-group">
+      <label>New Password <span class="text-muted">(min 8 characters)</span></label>
+      <input type="password" name="new_password" class="wide" autocomplete="new-password" required minlength="8">
+    </div>
+    <div class="form-group">
+      <label>Confirm New Password</label>
+      <input type="password" name="confirm_password" class="wide" autocomplete="new-password" required minlength="8">
+    </div>
+    <button type="submit" class="btn btn-primary">Update Password</button>
+  </form>
+</div>
+
+{# ═══ Discord Notifications ════════════════════════════════════════════════════ #}
+<div class="card">
+  <div class="card-title">🔔 Discord Notifications</div>
+  <p class="text-muted text-small" style="margin-bottom:1rem;">
+    When a scan detects new or modified rules, a summary is posted to your webhook.
+    Each user can have their own channel.
+  </p>
+  <form method="post" action="{{ url_for('settings_discord') }}" style="max-width:560px;">
+    <div class="form-group">
+      <label>Webhook URL</label>
+      <input type="text" name="discord_webhook" class="wide"
+             value="{{ user_settings.discord_webhook }}"
+             placeholder="https://discord.com/api/webhooks/…">
+      <p class="hint">
+        Create one in Discord: Server Settings → Integrations → Webhooks.
+        Leave blank to disable notifications.
+      </p>
+    </div>
+    <div class="gap-1">
+      <button type="submit" class="btn btn-primary">Save Webhook</button>
+
+      {% if user_settings.discord_webhook %}
+      <form method="post" action="{{ url_for('settings_discord_test') }}" style="display:inline;">
+        <button type="submit" class="btn btn-secondary">Send Test</button>
+      </form>
+      {% endif %}
+    </div>
+  </form>
+
+  {% if user_settings.discord_webhook %}
+  <p class="text-small text-success" style="margin-top:0.75rem;">
+    ✓ Webhook configured
+  </p>
+  {% else %}
+  <p class="text-small text-muted" style="margin-top:0.75rem;">
+    No webhook — notifications disabled
+  </p>
+  {% endif %}
+</div>
+
+{# ═══ Saved Filters ════════════════════════════════════════════════════════════ #}
+<div class="card">
+  <div class="card-title">⚡ Saved Filters</div>
+  <p class="text-muted text-small" style="margin-bottom:1rem;">
+    Quick-access preset buttons that appear at the top of the Detections and Updates pages.
+  </p>
+
+  {# Current filters list #}
+  {% if saved_filters %}
+  <table class="static-table" style="margin-bottom:1.25rem;">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Source</th>
+        <th>Change Type</th>
+        <th>Search Query</th>
+        <th style="width:80px;"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in saved_filters %}
+      <tr>
+        <td><strong>{{ f.name }}</strong></td>
+        <td>
+          {% if f.source %}
+            <span class="badge badge-{{ f.source }}">{{ f.source }}</span>
+          {% else %}
+            <span class="text-muted text-small">all</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if f.change_type %}
+            <span class="badge badge-{{ f.change_type }}">{{ f.change_type }}</span>
+          {% else %}
+            <span class="text-muted text-small">all</span>
+          {% endif %}
+        </td>
+        <td class="text-muted text-small">{{ f.q or '—' }}</td>
+        <td>
+          <form method="post" action="{{ url_for('settings_filters_delete') }}"
+                style="display:inline;" onsubmit="return confirm('Remove this filter?');">
+            <input type="hidden" name="filter_id" value="{{ f.id }}">
+            <button type="submit" class="btn btn-danger btn-sm">Remove</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="text-muted text-small" style="margin-bottom:1rem;">No saved filters yet.</p>
+  {% endif %}
+
+  {# Add filter form #}
+  <hr class="divider">
+  <p style="font-size:0.85rem; font-weight:600; margin-bottom:0.75rem;">Add a New Filter</p>
+  <form method="post" action="{{ url_for('settings_filters_add') }}" style="max-width:620px;">
+    <div class="form-group">
+      <label>Filter Name <span class="text-muted">(required, must be unique)</span></label>
+      <input type="text" name="name" class="wide" placeholder="e.g. New Sigma Rules" required>
+    </div>
+    <div class="form-row" style="margin-bottom:0.9rem;">
+      <div style="flex:1; min-width:140px;">
+        <label style="display:block; font-size:0.8rem; color:#a0aec0; margin-bottom:0.3rem;">Source</label>
+        <select name="source" class="wide">
+          <option value="">All Sources</option>
+          <option value="sigma">Sigma</option>
+          <option value="splunk">Splunk</option>
+        </select>
+      </div>
+      <div style="flex:1; min-width:140px;">
+        <label style="display:block; font-size:0.8rem; color:#a0aec0; margin-bottom:0.3rem;">Change Type</label>
+        <select name="change_type" class="wide">
+          <option value="">All Changes</option>
+          <option value="new">New</option>
+          <option value="modified">Modified</option>
+        </select>
+      </div>
+      <div style="flex:2; min-width:200px;">
+        <label style="display:block; font-size:0.8rem; color:#a0aec0; margin-bottom:0.3rem;">
+          Search Query <span class="text-muted">(optional)</span>
+        </label>
+        <input type="text" name="q" class="wide" placeholder="keyword or phrase">
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary">Save Filter</button>
+  </form>
+</div>
+
+{% endblock %}

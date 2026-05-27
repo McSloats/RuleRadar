@@ -24,8 +24,24 @@ CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     username      TEXT    NOT NULL UNIQUE,
     password_hash TEXT    NOT NULL,
+    is_admin      INTEGER NOT NULL DEFAULT 0,
     created_at    TEXT    NOT NULL
 );
+
+-- ── Per-user settings ──────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS user_settings (
+    user_id         INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    discord_webhook TEXT    NOT NULL DEFAULT '',
+    saved_filters   TEXT    NOT NULL DEFAULT '[]'
+);
+
+-- ── App-level configuration (replaces config.json) ────────────────────────────
+CREATE TABLE IF NOT EXISTS app_config (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
+
+INSERT OR IGNORE INTO app_config (key, value) VALUES ('github_token', '');
 
 -- ── Detection rules (current state of every known rule) ───────────────────────
 CREATE TABLE IF NOT EXISTS detections (
@@ -91,17 +107,57 @@ INSERT OR IGNORE INTO scan_status (id) VALUES (1);
 def get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    # Must be set per-connection for ON DELETE CASCADE to work
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
 def init_db():
-    """Create all tables and indexes if they do not already exist."""
+    """Create tables / indexes and apply any pending schema migrations."""
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        _migrate_schema(conn)
+
+
+def _migrate_schema(conn: sqlite3.Connection):
+    """
+    Idempotent migrations for databases created by older versions.
+    Each ALTER is wrapped in try/except — safe to run repeatedly.
+    """
+    migrations = [
+        # v2: admin flag on users (databases created before the settings redesign)
+        "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
+    ]
+    for sql in migrations:
+        try:
+            conn.execute(sql)
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # Column already exists — harmless
 
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# ── App-level config (replaces config.json) ────────────────────────────────────
+
+def get_app_config(key: str, default: str = "") -> str:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT value FROM app_config WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row else default
+
+
+def set_app_config(key: str, value: str):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO app_config (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
 
 
 # ── User helpers ───────────────────────────────────────────────────────────────
@@ -109,6 +165,26 @@ def now_iso() -> str:
 def user_count() -> int:
     with get_conn() as conn:
         return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+
+
+def admin_count() -> int:
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM users WHERE is_admin = 1"
+        ).fetchone()[0]
+
+
+def get_all_users() -> list[dict]:
+    """Return all users joined with their webhook status."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT u.id, u.username, u.is_admin, u.created_at,
+                      COALESCE(s.discord_webhook, '') AS discord_webhook
+               FROM users u
+               LEFT JOIN user_settings s ON s.user_id = u.id
+               ORDER BY u.id""",
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def get_user_by_username(username: str):
@@ -125,12 +201,83 @@ def get_user_by_id(user_id: int):
         ).fetchone()
 
 
-def create_user(username: str, password_hash: str):
+def create_user(username: str, password_hash: str, is_admin: bool = False):
+    """Create a user and initialise their settings row."""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO users (username, password_hash, is_admin, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (username, password_hash, 1 if is_admin else 0, now_iso()),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO user_settings (user_id) VALUES (?)",
+            (cur.lastrowid,),
+        )
+
+
+def update_user_password(user_id: int, password_hash: str):
     with get_conn() as conn:
         conn.execute(
-            "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
-            (username, password_hash, now_iso()),
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            (password_hash, user_id),
         )
+
+
+def set_user_admin(user_id: int, is_admin: bool):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET is_admin = ? WHERE id = ?",
+            (1 if is_admin else 0, user_id),
+        )
+
+
+def delete_user(user_id: int):
+    """Delete a user; the user_settings row is removed by ON DELETE CASCADE."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+
+# ── Per-user settings helpers ──────────────────────────────────────────────────
+
+def get_user_settings(user_id: int) -> dict:
+    """Return a user's settings row, creating it with defaults if absent."""
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO user_settings (user_id) VALUES (?)", (user_id,)
+        )
+        row = conn.execute(
+            "SELECT * FROM user_settings WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        return dict(row) if row else {
+            "user_id": user_id, "discord_webhook": "", "saved_filters": "[]"
+        }
+
+
+def update_user_discord(user_id: int, webhook: str):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO user_settings (user_id, discord_webhook) VALUES (?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET discord_webhook = excluded.discord_webhook",
+            (user_id, webhook),
+        )
+
+
+def update_user_filters(user_id: int, filters_json: str):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO user_settings (user_id, saved_filters) VALUES (?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET saved_filters = excluded.saved_filters",
+            (user_id, filters_json),
+        )
+
+
+def get_all_user_webhooks() -> list[str]:
+    """Return every non-empty Discord webhook URL (used for mass notification)."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT discord_webhook FROM user_settings WHERE discord_webhook != ''"
+        ).fetchall()
+        return [r["discord_webhook"] for r in rows]
 
 
 # ── Detection helpers ──────────────────────────────────────────────────────────

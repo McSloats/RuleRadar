@@ -8,6 +8,20 @@
   <button id="scan-btn" class="btn btn-scan" onclick="manualScan(this)">↻ Scan Now</button>
 </div>
 
+{# ── Saved filter presets ─────────────────────────────────────────────────── #}
+{% if saved_filters %}
+<div class="filter-presets">
+  <span class="preset-label">Quick filters:</span>
+  {% for f in saved_filters %}
+  <a class="preset-btn"
+     href="{{ url_for('updates', source=f.source, change_type=f.change_type) }}"
+     title="Source: {{ f.source or 'all' }} | Change: {{ f.change_type or 'all' }}">
+    {{ f.name }}
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+
 {# ── Filter form ──────────────────────────────────────────────────────────── #}
 <form method="get" action="{{ url_for('updates') }}" class="filter-form">
   <select name="source">

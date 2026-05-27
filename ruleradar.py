@@ -5,10 +5,12 @@ RuleRadar — security detection monitor for:
   - splunk/security_content (develop branch, detections/)
 
 Scans both repos for new/modified rules, persists everything to the
-local SQLite database, and sends a brief Discord notification when
-changes are found.
+local SQLite database, and sends a brief Discord notification to every
+user who has configured a personal webhook.
 
 Call run_scan() directly to trigger a scan from any other module.
+GitHub token and Discord webhooks are read from the database (configured
+via the web admin panel); no config.json is needed.
 """
 
 from __future__ import annotations
@@ -39,8 +41,6 @@ except ImportError:
     SIGMA_BACKEND_AVAILABLE = False  # Sigma→SPL conversion disabled; install pySigma-backend-splunk
 
 # ── constants ──────────────────────────────────────────────────────────────────
-CONFIG_PATH = Path(__file__).parent / "config.json"
-
 SIGMA_REPO  = {"owner": "SigmaHQ", "repo": "sigma",           "branch": "master"}
 SPLUNK_REPO = {"owner": "splunk",  "repo": "security_content", "branch": "develop"}
 
@@ -278,13 +278,16 @@ def send_discord(webhook_url: str, message: str):
 
 # ── Main scan entry point ──────────────────────────────────────────────────────
 
-def run_scan(cfg: dict | None = None) -> dict:
+def run_scan() -> dict:
     """
     Run a full scan cycle. Thread-safe — returns immediately if a scan is
     already in progress.
 
     On the first ever run (empty database) a 30-day window is used to
     populate the database with recent history. Subsequent runs use 2 hours.
+
+    GitHub token is read from the database (set via the admin panel).
+    Discord notifications are sent to every user with a webhook configured.
 
     Returns a summary dict: {new, modified, skipped, error}.
     """
@@ -295,13 +298,8 @@ def run_scan(cfg: dict | None = None) -> dict:
     try:
         db.set_scanning(True)
 
-        if cfg is None:
-            if not CONFIG_PATH.exists():
-                raise FileNotFoundError(f"config.json not found at {CONFIG_PATH}")
-            with open(CONFIG_PATH) as fh:
-                cfg = json.load(fh)
-
-        token = cfg.get("github_token", "")
+        # Read GitHub token from DB (set via admin panel; empty = unauthenticated)
+        token = db.get_app_config("github_token")
 
         if not YAML_AVAILABLE:
             print(
@@ -355,16 +353,16 @@ def run_scan(cfg: dict | None = None) -> dict:
             flush=True,
         )
 
-        # Discord notification (optional — only if webhook is configured and changes found)
-        webhook = cfg.get("discord_webhook_url", "")
-        if webhook and (total_new + total_mod) > 0:
+        # Send Discord notifications to every user who has a webhook configured
+        if total_new + total_mod > 0:
             msg = (
                 f"**RuleRadar — {timestamp}**\n"
                 f"Sigma: **{s_new}** new / **{s_mod}** modified\n"
                 f"Splunk: **{p_new}** new / **{p_mod}** modified\n"
                 f"View full details in your RuleRadar instance."
             )
-            send_discord(webhook, msg)
+            for webhook_url in db.get_all_user_webhooks():
+                send_discord(webhook_url, msg)
 
         print("Done.", flush=True)
         return {"new": total_new, "modified": total_mod, "skipped": False}
