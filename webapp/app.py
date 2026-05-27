@@ -5,6 +5,8 @@ JSON API endpoints for listing, fetching, and searching reports
 stored in the configured GitHub repository.
 """
 
+from __future__ import annotations
+
 import base64
 import json
 import urllib.error
