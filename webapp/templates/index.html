@@ -341,6 +341,75 @@
 
     .flatpickr-prev-month svg, .flatpickr-next-month svg { fill: var(--muted) !important; }
     .flatpickr-prev-month:hover svg, .flatpickr-next-month:hover svg { fill: var(--text) !important; }
+
+    /* ── Sidebar header row ─────────────────────────────────────────────────── */
+    .sidebar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .sidebar-meta { display: flex; align-items: center; gap: 8px; }
+
+    .last-checked {
+      font-size: 10px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .icon-btn {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 4px;
+      font-size: 13px;
+      line-height: 1;
+      transition: color .15s;
+    }
+
+    .icon-btn:hover { color: var(--text); }
+    .icon-btn.spinning i { animation: spin .75s linear infinite; }
+
+    /* ── Update toast ───────────────────────────────────────────────────────── */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--bg2);
+      border: 1px solid var(--accent);
+      color: var(--text);
+      padding: 11px 16px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      box-shadow: 0 4px 20px rgba(0,0,0,.5);
+      z-index: 200;
+      animation: slideUp .2s ease;
+    }
+
+    @keyframes slideUp {
+      from { transform: translateY(12px); opacity: 0; }
+      to   { transform: translateY(0);    opacity: 1; }
+    }
+
+    .toast i { color: var(--accent); font-size: 15px; }
+
+    .toast-dismiss {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 12px;
+      cursor: pointer;
+      margin-left: 4px;
+    }
+
+    .toast-dismiss:hover { color: var(--text); border-color: var(--muted); }
   </style>
 </head>
 <body>
@@ -378,7 +447,15 @@
 
   <!-- Sidebar -->
   <aside class="sidebar">
-    <div class="sidebar-header" id="sidebarHeader">Loading…</div>
+    <div class="sidebar-header">
+      <span id="sidebarCount">Loading…</span>
+      <div class="sidebar-meta">
+        <span class="last-checked" id="lastChecked"></span>
+        <button class="icon-btn" id="refreshBtn" title="Refresh reports">
+          <i class="bi bi-arrow-clockwise"></i>
+        </button>
+      </div>
+    </div>
     <div class="report-list" id="reportList">
       <div class="state" style="height:220px;">
         <div class="spinner"></div>
@@ -422,18 +499,19 @@ const fpTo   = flatpickr("#toDate",   fpOpts);
     allReports = await res.json();
     visibleReports = allReports;
     renderSidebar(allReports);
+    updateLastChecked();
   } catch (e) {
     document.getElementById("reportList").innerHTML = stateHTML(
       "bi-exclamation-circle", "Failed to load reports"
     );
-    document.getElementById("sidebarHeader").textContent = "Error";
+    document.getElementById("sidebarCount").textContent = "Error";
   }
 })();
 
 // ── Sidebar rendering ─────────────────────────────────────────────────────────
 function renderSidebar(reports) {
   const n = reports.length;
-  document.getElementById("sidebarHeader").textContent =
+  document.getElementById("sidebarCount").textContent =
     `${n} report${n !== 1 ? "s" : ""}`;
 
   if (n === 0) {
@@ -528,7 +606,7 @@ async function applyFilter() {
       if (el) openReport(activeFile, el);
     }
   } catch (e) {
-    document.getElementById("sidebarHeader").textContent = "Error";
+    document.getElementById("sidebarCount").textContent = "Error";
     document.getElementById("reportList").innerHTML =
       stateHTML("bi-exclamation-circle", "Search failed");
   }
@@ -567,9 +645,74 @@ function stateHTML(icon, msg) {
           </div>`;
 }
 
+// ── Last-checked timestamp ────────────────────────────────────────────────────
+function updateLastChecked() {
+  const now = new Date();
+  const hh  = String(now.getHours()).padStart(2, "0");
+  const mm  = String(now.getMinutes()).padStart(2, "0");
+  document.getElementById("lastChecked").textContent = `${hh}:${mm}`;
+}
+
+// ── Manual refresh ────────────────────────────────────────────────────────────
+async function refreshReports() {
+  const btn = document.getElementById("refreshBtn");
+  btn.classList.add("spinning");
+
+  try {
+    const res    = await fetch("/api/reports");
+    if (!res.ok) throw new Error(res.statusText);
+    const latest = await res.json();
+
+    const newCount = latest.length - allReports.length;
+    allReports = latest;
+    updateLastChecked();
+
+    // Re-apply any active filter against the fresh list
+    if (!currentQuery) {
+      const from = document.getElementById("fromDate").value;
+      const to   = document.getElementById("toDate").value;
+      visibleReports = allReports.filter(r =>
+        (!from || r.date >= from) && (!to || r.date <= to)
+      );
+      renderSidebar(visibleReports);
+    }
+
+    if (newCount > 0) showToast(newCount);
+  } catch (e) {
+    // Silently ignore refresh errors
+  } finally {
+    btn.classList.remove("spinning");
+  }
+}
+
+// ── Auto-poll every 5 minutes ─────────────────────────────────────────────────
+setInterval(refreshReports, 5 * 60 * 1000);
+
+// ── Update toast ──────────────────────────────────────────────────────────────
+function showToast(count) {
+  const existing = document.getElementById("rr-toast");
+  if (existing) existing.remove();
+
+  const toast = document.createElement("div");
+  toast.id        = "rr-toast";
+  toast.className = "toast";
+  toast.innerHTML = `
+    <i class="bi bi-arrow-repeat"></i>
+    ${count} new report${count !== 1 ? "s" : ""} available
+    <button class="toast-dismiss" onclick="document.getElementById('rr-toast').remove()">
+      Dismiss
+    </button>
+  `;
+  document.body.appendChild(toast);
+
+  // Auto-dismiss after 10 seconds
+  setTimeout(() => toast.remove(), 10_000);
+}
+
 // ── Event listeners ───────────────────────────────────────────────────────────
 document.getElementById("filterBtn").addEventListener("click", applyFilter);
 document.getElementById("clearBtn").addEventListener("click", clearFilters);
+document.getElementById("refreshBtn").addEventListener("click", refreshReports);
 document.getElementById("searchInput").addEventListener("keydown", e => {
   if (e.key === "Enter") applyFilter();
 });

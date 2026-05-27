@@ -11,13 +11,11 @@ Every 24 hours RuleRadar:
 4. Posts the report to a Discord channel as a file attachment
 5. Uploads the report to a GitHub repository under `reports/`
 
-The web interface lets you browse all uploaded reports, filter by date range, and full-text search across every report.
+The web interface lets you browse all uploaded reports, filter by date range, full-text search across every report, and auto-refreshes every 5 minutes to surface new reports without a page reload.
 
-## Quick start (Docker)
+## Configuration
 
-### 1. Configure
-
-Fill in `config.json` with your values:
+Fill in `config.json` before running:
 
 | Key | Description |
 |-----|-------------|
@@ -27,23 +25,11 @@ Fill in `config.json` with your values:
 | `github_reports_repo` | Name of the repo where reports will be uploaded |
 | `github_reports_branch` | Branch to commit reports to (default: `main`) |
 
-### 2. Build and launch
+---
 
-```bash
-docker compose up --build -d
-```
+## Running manually
 
-The web interface is available at **http://localhost:5000**
-
-### 3. Stop
-
-```bash
-docker compose down
-```
-
-## Manual setup (without Docker)
-
-### 1. Install dependencies
+### Install dependencies
 
 ```bash
 python3 -m venv .venv
@@ -51,30 +37,58 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Run the monitor manually
+### Start everything at once
 
 ```bash
-python3 ruleradar.py
+python3 start.py
 ```
 
-### 3. Run the web interface
+This starts the **web interface** and **scheduler** together. Open http://localhost:5000.
+
+### Optional: run the monitor immediately on startup
 
 ```bash
-python3 webapp/app.py
+python3 start.py --run-now
 ```
 
-### 4. Schedule with cron (Linux)
+Runs `ruleradar.py` once right away (generating a report and sending to Discord), then starts the scheduler for future daily runs.
+
+### Run components individually
+
+| Command | What it does |
+|---------|-------------|
+| `python3 ruleradar.py` | Run one monitor cycle immediately |
+| `python3 webapp/app.py` | Web interface only (port 5000) |
+| `python3 scheduler.py` | Scheduler only (fires `ruleradar.py` daily at 08:00 ET) |
+
+---
+
+## Running with Docker
+
+### Build and launch
 
 ```bash
-bash setup_cron.sh
+docker compose up --build -d
 ```
+
+Open **http://localhost:5000**. The scheduler runs automatically inside the container.
+
+### Stop
+
+```bash
+docker compose down
+```
+
+---
 
 ## Services
 
 | Service | Description |
 |---------|-------------|
-| `web` | Flask web interface on port 5000 — browse and search reports |
-| `scheduler` | APScheduler container — runs `ruleradar.py` daily at 8 AM ET |
+| `web` | Flask web interface — browse, filter, and search reports |
+| `scheduler` | Runs `ruleradar.py` daily at 08:00 ET via APScheduler |
+
+---
 
 ## Uninstall
 
@@ -82,4 +96,4 @@ bash setup_cron.sh
 bash cleanup.sh
 ```
 
-Removes the cron job, virtual environment, log file, and optionally the entire project directory.
+Removes any cron job, virtual environment, log file, and optionally the project directory.
