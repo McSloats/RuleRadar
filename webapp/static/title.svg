@@ -1,13 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 444 104" width="444" height="104">
-  <rect width="444" height="104" rx="8" fill="#160f2a"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 470 104" width="470" height="104">
+  <rect width="470" height="104" rx="8" fill="#160f2a"/>
   <text
     font-family="'Courier New', Courier, monospace"
     font-size="14"
     fill="#d4a017"
     xml:space="preserve">
-    <tspan x="12" y="20">   ____        __    ____            __</tspan>
-    <tspan x="12" dy="18">  / __ \__  __/ /__ / __ \____ _____/ /___  _____</tspan>
-    <tspan x="12" dy="18"> / /_/ / / / / / _ \/ /_/ / __ `/ __  / _ `/ ___/</tspan>
+    <tspan x="12" y="20">    ____        __    ____            __</tspan>
+    <tspan x="12" dy="18">   / __ \__  __/ /__ / __ \____ _____/ /___  _____</tspan>
+    <tspan x="12" dy="18">  / /_/ / / / / / _ \/ /_/ / __ `/ __  / _ `/ ___/</tspan>
     <tspan x="12" dy="18"> / _, _/ /_/ / /  __/ _, _/ /_/ / /_/ / /_/ / /</tspan>
     <tspan x="12" dy="18">/_/ |_|\__,_/_/\___/_/ |_|\__,_/\__,_/\__,_/_/</tspan>
   </text>
