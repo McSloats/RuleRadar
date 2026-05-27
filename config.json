@@ -1,4 +1,4 @@
 {
-  "github_token": "PASTE_YOUR_GITHUB_TOKEN_HERE",
-  "discord_webhook_url": "PASTE_YOUR_DISCORD_WEBHOOK_URL_HERE"
+  "github_token": "",
+  "discord_webhook_url": ""
 }

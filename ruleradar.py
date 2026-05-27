@@ -56,9 +56,18 @@ _scan_lock = threading.Lock()
 
 # ── GitHub helpers ─────────────────────────────────────────────────────────────
 
+def _is_real_token(token: str) -> bool:
+    """Return True only if the token looks like an actual GitHub token."""
+    if not token:
+        return False
+    # GitHub tokens start with a known prefix; reject obvious placeholders
+    known_prefixes = ("ghp_", "github_pat_", "ghs_", "gho_", "v1.")
+    return any(token.startswith(p) for p in known_prefixes)
+
+
 def gh(url: str, token: str) -> dict | list | None:
     req = urllib.request.Request(url)
-    if token:
+    if _is_real_token(token):
         req.add_header("Authorization", f"Bearer {token}")
     req.add_header("Accept", "application/vnd.github.v3+json")
     req.add_header("User-Agent", "ruleradar/1.0")
