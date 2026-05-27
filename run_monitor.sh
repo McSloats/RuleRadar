@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Wrapper called by cron. Activates the venv if present, then runs the monitor.
+# Wrapper called by cron. Activates the venv if present, then runs RuleRadar.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,4 +12,4 @@ else
     PYTHON="$(command -v python3)"
 fi
 
-"$PYTHON" "$SCRIPT_DIR/security_monitor.py" >> "$SCRIPT_DIR/monitor_log.txt" 2>&1
+"$PYTHON" "$SCRIPT_DIR/ruleradar.py" >> "$SCRIPT_DIR/monitor_log.txt" 2>&1
