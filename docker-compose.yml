@@ -19,7 +19,7 @@ services:
       retries: 3
       start_period: 15s
 
-  # ── Hourly scheduler ───────────────────────────────────────────────────────────
+  # ── Bi-hourly scheduler (fires at 00:00, 02:00 … 22:00 UTC) ─────────────────
   scheduler:
     build: .
     container_name: ruleradar-scheduler

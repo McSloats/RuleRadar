@@ -1,0 +1,320 @@
+{% extends "layout.html" %}
+{% block title %}GitHub Token Required — RuleRadar{% endblock %}
+
+{% block content %}
+<div class="token-gate-wrap">
+  <div class="token-gate-card">
+
+    {# ── Header ─────────────────────────────────────────────────────────────── #}
+    <div class="token-gate-header">
+      <span class="token-gate-icon">🔑</span>
+      <div>
+        <h1>GitHub API Token Required</h1>
+        <p class="subtitle">
+          A personal access token must be configured before you can use RuleRadar.
+        </p>
+      </div>
+    </div>
+
+    {# ── Why ─────────────────────────────────────────────────────────────────── #}
+    <div class="info-box">
+      <strong>Why is this required?</strong>
+      Without a token, GitHub's public API is limited to <strong>60 requests/hour</strong>.
+      RuleRadar needs to index thousands of rule files across two repositories, which
+      requires the authenticated limit of <strong>5,000 requests/hour</strong>.
+      Your token is only used to read public repository data — it never modifies anything.
+    </div>
+
+    {# ── How to get a token ──────────────────────────────────────────────────── #}
+    <div class="setup-steps">
+      <p class="steps-title">How to create a GitHub personal access token:</p>
+      <div class="steps-columns">
+        <div>
+          <p class="steps-sub">Classic token (simplest)</p>
+          <ol>
+            <li>
+              Go to
+              <a href="https://github.com/settings/tokens/new" target="_blank" rel="noopener">
+                github.com/settings/tokens/new
+              </a>
+            </li>
+            <li>Set a descriptive <strong>Note</strong> — e.g. <em>RuleRadar</em></li>
+            <li>Set an <strong>Expiration</strong> (90 days or longer recommended)</li>
+            <li>Under <strong>Select scopes</strong>, tick <strong>public_repo</strong></li>
+            <li>Scroll down and click <strong>Generate token</strong></li>
+            <li>Copy the token — it starts with <code>ghp_</code></li>
+          </ol>
+        </div>
+        <div>
+          <p class="steps-sub">Fine-grained token (more restrictive)</p>
+          <ol>
+            <li>
+              Go to
+              <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">
+                github.com/settings/personal-access-tokens/new
+              </a>
+            </li>
+            <li>Set a <strong>Token name</strong> and expiration</li>
+            <li>Under <strong>Repository access</strong> → <em>Only select repositories</em>
+                → add <code>SigmaHQ/sigma</code> and <code>splunk/security_content</code></li>
+            <li>Under <strong>Permissions → Repository permissions</strong> →
+                <em>Contents</em>: <strong>Read-only</strong></li>
+            <li>Click <strong>Generate token</strong></li>
+            <li>Copy the token — it starts with <code>github_pat_</code></li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    {# ── Token input ─────────────────────────────────────────────────────────── #}
+    <div class="form-group" style="margin-top:1.5rem;">
+      <label style="font-size:0.85rem; color:#a0aec0; font-weight:600;">
+        Paste your GitHub token here
+      </label>
+      <div style="display:flex; gap:0.5rem; align-items:center; margin-top:0.35rem;">
+        <input type="password" id="token-input"
+               placeholder="ghp_… or github_pat_…"
+               autocomplete="off" spellcheck="false"
+               style="flex:1; min-width:0;"
+               oninput="onTokenInput()">
+        <button type="button" class="btn btn-secondary btn-sm"
+                onclick="toggleShow(this, 'token-input')">Show</button>
+      </div>
+    </div>
+
+    {# ── Validate button + status ─────────────────────────────────────────────── #}
+    <div style="display:flex; gap:0.75rem; align-items:center; margin-bottom:1.25rem;">
+      <button id="validate-btn" type="button" class="btn btn-secondary"
+              onclick="validateToken()" disabled>
+        Test Token
+      </button>
+      <span id="validate-status" class="text-small"></span>
+    </div>
+
+    {# ── Confirmation / submit section (hidden until token is validated) ─────── #}
+    <div id="confirm-section" style="display:none;">
+      <hr style="border:none; border-top:1px solid #2d3748; margin-bottom:1.25rem;">
+
+      <div class="confirm-box">
+        <div class="confirm-icon">✓</div>
+        <div>
+          <p style="font-weight:600; margin-bottom:0.3rem;">Token validated successfully</p>
+          <p id="confirm-detail" class="text-small text-muted"></p>
+        </div>
+      </div>
+
+      <p style="font-size:0.85rem; color:#a0aec0; margin:1rem 0 0.75rem;">
+        RuleRadar will now perform an <strong>initial catalog scan</strong> — fetching
+        every rule file from <strong>SigmaHQ/sigma</strong> and
+        <strong>splunk/security_content</strong>. This runs in the background and may
+        take a few minutes. After this, scans automatically repeat every two hours
+        at even UTC hours (00:00, 02:00, 04:00&nbsp;…).
+      </p>
+
+      <form id="submit-form" method="post" action="{{ url_for('setup_token_submit') }}">
+        <input type="hidden" id="token-hidden" name="github_token">
+        <button type="submit" class="btn btn-primary btn-full"
+                style="font-size:0.95rem; padding:0.65rem 1rem;">
+          ✓ Save Token &amp; Start Initial Scan
+        </button>
+      </form>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+function toggleShow(btn, inputId) {
+  const el = document.getElementById(inputId);
+  if (el.type === 'password') {
+    el.type = 'text';
+    btn.textContent = 'Hide';
+  } else {
+    el.type = 'password';
+    btn.textContent = 'Show';
+  }
+}
+
+function onTokenInput() {
+  const val = document.getElementById('token-input').value.trim();
+  document.getElementById('validate-btn').disabled = val.length < 10;
+  // Reset confirmation if the user edits the token after validating
+  document.getElementById('confirm-section').style.display = 'none';
+  document.getElementById('validate-status').textContent = '';
+}
+
+// ── Token validation (AJAX) ────────────────────────────────────────────────────
+
+async function validateToken() {
+  const token  = document.getElementById('token-input').value.trim();
+  const btn    = document.getElementById('validate-btn');
+  const status = document.getElementById('validate-status');
+
+  btn.disabled    = true;
+  btn.textContent = 'Testing…';
+  status.textContent = '';
+  status.style.color = '';
+
+  try {
+    const res  = await fetch('{{ url_for("setup_token_validate") }}', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ token }),
+    });
+    const data = await res.json();
+
+    if (data.valid) {
+      status.textContent = `✓ Token accepted — ${data.limit.toLocaleString()} req/hr (${data.remaining.toLocaleString()} remaining)`;
+      status.style.color = '#68d391';
+      // Show confirmation section
+      document.getElementById('token-hidden').value = token;
+      document.getElementById('confirm-detail').textContent =
+        `Rate limit: ${data.limit.toLocaleString()} requests/hour · ${data.remaining.toLocaleString()} remaining`;
+      document.getElementById('confirm-section').style.display = 'block';
+    } else {
+      status.textContent = '✗ ' + (data.error || 'Token validation failed');
+      status.style.color = '#fc8181';
+      document.getElementById('confirm-section').style.display = 'none';
+    }
+  } catch (err) {
+    status.textContent = '✗ Network error — check your connection';
+    status.style.color = '#fc8181';
+  } finally {
+    btn.disabled    = false;
+    btn.textContent = 'Test Token';
+  }
+}
+
+// Allow pressing Enter in the token field to trigger validation
+document.getElementById('token-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const btn = document.getElementById('validate-btn');
+    if (!btn.disabled) validateToken();
+  }
+});
+</script>
+
+<style>
+/* ── Token gate layout ─────────────────────────────────────────────────── */
+.token-gate-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 2rem 1rem;
+}
+.token-gate-card {
+  width: 100%;
+  max-width: 760px;
+  background: #161b27;
+  border: 1px solid #2d3748;
+  border-radius: 10px;
+  padding: 2rem;
+}
+.token-gate-header {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
+}
+.token-gate-icon {
+  font-size: 2rem;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+.token-gate-header h1 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  margin-bottom: 0.25rem;
+}
+.token-gate-header .subtitle {
+  font-size: 0.875rem;
+  color: #718096;
+}
+
+/* ── Info box ──────────────────────────────────────────────────────────── */
+.info-box {
+  background: #0f1117;
+  border: 1px solid #2a4365;
+  border-left: 3px solid #63b3ed;
+  border-radius: 6px;
+  padding: 0.85rem 1rem;
+  font-size: 0.875rem;
+  color: #a0aec0;
+  line-height: 1.6;
+  margin-bottom: 1.5rem;
+}
+.info-box strong { color: #e2e8f0; }
+
+/* ── Steps section ─────────────────────────────────────────────────────── */
+.setup-steps {
+  background: #0f1117;
+  border: 1px solid #2d3748;
+  border-radius: 6px;
+  padding: 1rem 1.1rem;
+}
+.steps-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  margin-bottom: 0.75rem;
+}
+.steps-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+}
+@media (max-width: 580px) {
+  .steps-columns { grid-template-columns: 1fr; }
+}
+.steps-sub {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #718096;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+.setup-steps ol {
+  padding-left: 1.25rem;
+  margin: 0;
+}
+.setup-steps li {
+  font-size: 0.83rem;
+  color: #a0aec0;
+  line-height: 1.7;
+}
+.setup-steps a { color: #63b3ed; }
+.setup-steps a:hover { color: #90cdf4; }
+.setup-steps code {
+  background: #1a202c;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.78rem;
+}
+
+/* ── Confirm box ───────────────────────────────────────────────────────── */
+.confirm-box {
+  display: flex;
+  gap: 0.85rem;
+  align-items: flex-start;
+  background: #1c4532;
+  border: 1px solid #276749;
+  border-radius: 6px;
+  padding: 0.85rem 1rem;
+  margin-bottom: 0;
+}
+.confirm-icon {
+  font-size: 1.2rem;
+  color: #68d391;
+  flex-shrink: 0;
+  margin-top: 0.05rem;
+}
+.confirm-box p { margin: 0; color: #e2e8f0; }
+.confirm-box .text-muted { color: #9ae6b4; }
+</style>
+
+{% endblock %}

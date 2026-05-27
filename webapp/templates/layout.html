@@ -193,9 +193,6 @@
     .btn-secondary:hover { background: #4a5568; }
     .btn-danger    { background: #742a2a; color: #fc8181; }
     .btn-danger:hover { background: #9b2c2c; }
-    .btn-scan      { background: #285e61; color: #81e6d9; margin-left: auto; }
-    .btn-scan:hover { background: #234e52; }
-    .btn-scan:disabled { opacity: 0.6; cursor: not-allowed; }
     .btn-full { width: 100%; text-align: center; }
     .btn-sm { padding: 0.3rem 0.65rem; font-size: 0.8rem; }
 
@@ -288,17 +285,76 @@
     .badge-modified { background: #7b341e; color: #fbd38d; }
     .badge-admin    { background: #2c5282; color: #90cdf4; }
     .badge-user     { background: #2d3748; color: #a0aec0; }
+    /* MITRE technique badges — clickable */
+    .badge-mitre {
+      background: #1a2e1a; color: #68d391;
+      border: 1px solid #276749;
+      text-decoration: none; cursor: pointer;
+      transition: background 0.12s;
+      margin: 0.1rem 0.15rem 0.1rem 0;
+    }
+    .badge-mitre:hover { background: #276749; color: #c6f6d5; }
+    /* MITRE tactic badges */
+    .badge-tactic {
+      background: #1a2035; color: #90cdf4;
+      border: 1px solid #2c5282;
+      text-decoration: none; cursor: pointer;
+      transition: background 0.12s;
+      margin: 0.1rem 0.15rem 0.1rem 0;
+    }
+    .badge-tactic:hover { background: #2c5282; color: #bee3f8; }
+    /* Sigma rule severity levels */
+    .badge-sev-critical      { background: #5c1a1a; color: #fc8181; }
+    .badge-sev-high          { background: #7b341e; color: #fbd38d; }
+    .badge-sev-medium        { background: #7b6914; color: #faf089; }
+    .badge-sev-low           { background: #1a3a3a; color: #81e6d9; }
+    .badge-sev-informational { background: #1a2535; color: #90cdf4; }
+    /* Rule status */
+    .badge-stable       { background: #1c4532; color: #68d391; }
+    .badge-test         { background: #2d3748; color: #a0aec0; }
+    .badge-experimental { background: #7b341e; color: #fbd38d; }
+    .badge-deprecated   { background: #3d2626; color: #fc8181; }
+    .badge-unsupported  { background: #3d2626; color: #fc8181; }
 
     /* ── Detail expand ── */
     .detail-label {
-      font-size: 0.75rem;
+      display: inline-block;
+      font-size: 0.7rem;
       font-weight: 600;
-      color: #718096;
+      color: #4a5568;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
-      margin: 0.6rem 0 0.3rem;
+      letter-spacing: 0.06em;
+      margin-right: 0.35rem;
     }
-    .detail-label:first-child { margin-top: 0; }
+    p.detail-label {
+      display: block;
+      margin: 0.65rem 0 0.3rem;
+    }
+    p.detail-label:first-child { margin-top: 0; }
+    /* metadata strip — author / status / date */
+    .detail-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 1.25rem;
+      margin-bottom: 0.6rem;
+      font-size: 0.82rem;
+      color: #a0aec0;
+      border-bottom: 1px solid #1a202c;
+      padding-bottom: 0.5rem;
+    }
+    /* MITRE strip */
+    .detail-mitre {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.1rem;
+      margin-bottom: 0.5rem;
+    }
+    /* MITRE cell in table */
+    .mitre-cell {
+      white-space: normal;
+      min-width: 140px;
+    }
     pre {
       background: #0a0d14;
       border: 1px solid #2d3748;
@@ -311,6 +367,14 @@
       overflow-x: auto;
     }
     .detail-text { font-size: 0.83rem; color: #718096; line-height: 1.5; }
+    /* References list */
+    .detail-refs {
+      margin: 0.2rem 0 0.4rem 1rem;
+      font-size: 0.8rem;
+      color: #718096;
+      line-height: 1.8;
+    }
+    .detail-refs li { word-break: break-all; }
 
     /* ── Pagination ── */
     .pagination {
@@ -366,6 +430,33 @@
       border-radius: 6px;
     }
 
+    /* ── Scan status grid (settings page) ── */
+    .scan-status-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+    }
+    .scan-stat-cell {
+      background: #0f1117;
+      border: 1px solid #2d3748;
+      border-radius: 6px;
+      padding: 0.85rem 1rem;
+    }
+    .scan-stat-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: #4a5568;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.4rem;
+    }
+    .scan-stat-value {
+      font-size: 0.875rem;
+      color: #e2e8f0;
+      font-weight: 500;
+      word-break: break-all;
+    }
+
     /* ── Misc ── */
     a { color: #63b3ed; }
     a:hover { color: #90cdf4; }
@@ -417,30 +508,32 @@
 
 {% if current_user.is_authenticated %}
 <script>
+/**
+ * Polls /api/scan/status every 15 seconds and updates the nav-bar badge.
+ * Shows "Scanning…" while a scan is in progress, otherwise shows the
+ * last scan timestamp.  No scan is triggered by this function — scans
+ * are owned by the scheduler (scheduler.py) and the token-setup flow.
+ */
 async function refreshScanBadge() {
   try {
-    const res  = await fetch('/api/scan/status');
-    const data = await res.json();
+    const res   = await fetch('/api/scan/status');
+    const data  = await res.json();
     const badge = document.getElementById('scan-badge');
     const text  = document.getElementById('scan-text');
     if (data.is_scanning) {
-      badge.className = 'scanning';
+      badge.className  = 'scanning';
       text.textContent = 'Scanning…';
+    } else if (data.last_scan) {
+      badge.className  = '';
+      text.textContent = 'Last scan: ' + new Date(data.last_scan).toLocaleString();
     } else {
-      badge.className = '';
-      text.textContent = data.last_scan
-        ? 'Last scan: ' + new Date(data.last_scan).toLocaleString()
-        : 'No scan yet';
+      badge.className  = '';
+      text.textContent = 'No scan yet';
     }
   } catch (_) {}
 }
 
-async function triggerPageScan() {
-  try { await fetch('/api/scan/trigger', { method: 'POST' }); } catch (_) {}
-}
-
 refreshScanBadge();
-triggerPageScan();
 setInterval(refreshScanBadge, 15000);
 </script>
 {% endif %}

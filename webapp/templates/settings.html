@@ -6,6 +6,52 @@
   <h2>Settings</h2>
 </div>
 
+{# ═══ API & Scan Status ════════════════════════════════════════════════════════ #}
+<div class="card">
+  <div class="card-title">📡 GitHub API &amp; Scan Schedule</div>
+
+  <div class="scan-status-grid">
+
+    {# Token status #}
+    <div class="scan-stat-cell">
+      <p class="scan-stat-label">GitHub Token</p>
+      {% if token_is_set %}
+        <p class="scan-stat-value" style="font-family:monospace; font-size:0.82rem;
+           letter-spacing:0.03em; color:#68d391;">
+          {{ token_display }}
+        </p>
+        <p class="text-muted text-small" style="margin-top:0.25rem;">
+          ✓ Token active — 5,000 req/hr
+          {% if current_user.is_admin %}
+            · <a href="{{ url_for('admin') }}">Change in Admin panel</a>
+          {% endif %}
+        </p>
+      {% else %}
+        <p class="scan-stat-value text-danger">Not configured</p>
+        <p class="text-small" style="margin-top:0.25rem;">
+          <a href="{{ url_for('setup_token') }}">Set up your GitHub token →</a>
+        </p>
+      {% endif %}
+    </div>
+
+    {# Last scan #}
+    <div class="scan-stat-cell">
+      <p class="scan-stat-label">Last Scan</p>
+      <p class="scan-stat-value">{{ last_scan_display }}</p>
+    </div>
+
+    {# Next scheduled scan #}
+    <div class="scan-stat-cell">
+      <p class="scan-stat-label">Next Scheduled Scan</p>
+      <p class="scan-stat-value">{{ next_scan_display }}</p>
+      <p class="text-muted text-small" style="margin-top:0.25rem;">
+        Runs automatically every 2 hours at even UTC hours
+      </p>
+    </div>
+
+  </div>
+</div>
+
 {# ═══ Change Password ══════════════════════════════════════════════════════════ #}
 <div class="card">
   <div class="card-title">🔒 Change Password</div>
@@ -82,6 +128,7 @@
         <th>Source</th>
         <th>Change Type</th>
         <th>Search Query</th>
+        <th>MITRE</th>
         <th style="width:80px;"></th>
       </tr>
     </thead>
@@ -104,6 +151,7 @@
           {% endif %}
         </td>
         <td class="text-muted text-small">{{ f.q or '—' }}</td>
+        <td class="text-muted text-small">{{ f.get('mitre', '') or '—' }}</td>
         <td>
           <form method="post" action="{{ url_for('settings_filters_delete') }}"
                 style="display:inline;" onsubmit="return confirm('Remove this filter?');">
@@ -149,6 +197,12 @@
           Search Query <span class="text-muted">(optional)</span>
         </label>
         <input type="text" name="q" class="wide" placeholder="keyword or phrase">
+      </div>
+      <div style="flex:1; min-width:140px;">
+        <label style="display:block; font-size:0.8rem; color:#a0aec0; margin-bottom:0.3rem;">
+          MITRE TTP <span class="text-muted">(optional)</span>
+        </label>
+        <input type="text" name="mitre" class="wide" placeholder="e.g. T1059 or Execution">
       </div>
     </div>
     <button type="submit" class="btn btn-primary">Save Filter</button>

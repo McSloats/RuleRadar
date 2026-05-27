@@ -5,7 +5,6 @@
 
 <div class="page-header">
   <h2>Updates</h2>
-  <button id="scan-btn" class="btn btn-scan" onclick="manualScan(this)">↻ Scan Now</button>
 </div>
 
 {# ── Saved filter presets ─────────────────────────────────────────────────── #}
@@ -135,7 +134,7 @@
     {% if source or change_type %}
       No updates found matching your filters.
     {% else %}
-      No updates recorded yet.<br>Click <strong>↻ Scan Now</strong> to run the first scan.
+      No updates recorded yet.<br>The initial scan is running in the background — check back shortly.
     {% endif %}
   </p>
 </div>
@@ -148,22 +147,6 @@ function toggleDetail(row) {
   const open   = detail.style.display !== 'table-row';
   detail.style.display = open ? 'table-row' : 'none';
   arrow.textContent = open ? '▼' : '▶';
-}
-
-async function manualScan(btn) {
-  btn.disabled = true;
-  btn.textContent = '↻ Scanning…';
-  try {
-    await fetch('/api/scan/trigger', { method: 'POST' });
-    btn.textContent = '↻ Scan queued';
-    setTimeout(() => {
-      btn.textContent = '↻ Scan Now';
-      btn.disabled = false;
-    }, 5000);
-  } catch (_) {
-    btn.textContent = '↻ Scan Now';
-    btn.disabled = false;
-  }
 }
 </script>
 

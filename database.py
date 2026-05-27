@@ -45,21 +45,29 @@ INSERT OR IGNORE INTO app_config (key, value) VALUES ('github_token', '');
 
 -- ── Detection rules (current state of every known rule) ───────────────────────
 CREATE TABLE IF NOT EXISTS detections (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    source          TEXT    NOT NULL,
-    file_path       TEXT    NOT NULL,
-    title           TEXT    NOT NULL DEFAULT '',
-    description     TEXT    NOT NULL DEFAULT '',
-    detection_logic TEXT    NOT NULL DEFAULT '',
-    spl             TEXT    NOT NULL DEFAULT '',
-    rule_url        TEXT    NOT NULL DEFAULT '',
-    first_seen      TEXT    NOT NULL,
-    last_updated    TEXT    NOT NULL,
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    source           TEXT    NOT NULL,
+    file_path        TEXT    NOT NULL,
+    title            TEXT    NOT NULL DEFAULT '',
+    description      TEXT    NOT NULL DEFAULT '',
+    detection_logic  TEXT    NOT NULL DEFAULT '',
+    spl              TEXT    NOT NULL DEFAULT '',
+    rule_url         TEXT    NOT NULL DEFAULT '',
+    first_seen       TEXT    NOT NULL,
+    last_updated     TEXT    NOT NULL,
+    mitre_techniques TEXT    NOT NULL DEFAULT '',
+    mitre_tactics    TEXT    NOT NULL DEFAULT '',
+    author           TEXT    NOT NULL DEFAULT '',
+    rule_status      TEXT    NOT NULL DEFAULT '',
+    severity         TEXT    NOT NULL DEFAULT '',
+    rule_date        TEXT    NOT NULL DEFAULT '',
+    refs             TEXT    NOT NULL DEFAULT '',
     UNIQUE(source, file_path)
 );
 
 CREATE INDEX IF NOT EXISTS idx_det_source       ON detections(source);
 CREATE INDEX IF NOT EXISTS idx_det_last_updated ON detections(last_updated DESC);
+CREATE INDEX IF NOT EXISTS idx_det_mitre        ON detections(mitre_techniques);
 
 -- ── Change log (every new/modified event is appended here) ────────────────────
 CREATE TABLE IF NOT EXISTS updates (
@@ -106,11 +114,12 @@ CREATE INDEX IF NOT EXISTS idx_log_level     ON activity_log(level);
 
 -- ── Singleton scan-status row ─────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS scan_status (
-    id          INTEGER PRIMARY KEY CHECK (id = 1),
-    last_scan   TEXT,
-    new_count   INTEGER NOT NULL DEFAULT 0,
-    mod_count   INTEGER NOT NULL DEFAULT 0,
-    is_scanning INTEGER NOT NULL DEFAULT 0
+    id           INTEGER PRIMARY KEY CHECK (id = 1),
+    last_scan    TEXT,
+    new_count    INTEGER NOT NULL DEFAULT 0,
+    mod_count    INTEGER NOT NULL DEFAULT 0,
+    is_scanning  INTEGER NOT NULL DEFAULT 0,
+    catalog_done INTEGER NOT NULL DEFAULT 0
 );
 
 INSERT OR IGNORE INTO scan_status (id) VALUES (1);
@@ -143,6 +152,16 @@ def _migrate_schema(conn: sqlite3.Connection):
     migrations = [
         # v2: admin flag on users (databases created before the settings redesign)
         "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
+        # v3: extended detection metadata and MITRE fields
+        "ALTER TABLE detections ADD COLUMN mitre_techniques TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE detections ADD COLUMN mitre_tactics    TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE detections ADD COLUMN author           TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE detections ADD COLUMN rule_status      TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE detections ADD COLUMN severity         TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE detections ADD COLUMN rule_date        TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE detections ADD COLUMN refs             TEXT NOT NULL DEFAULT ''",
+        # v4: catalog scan tracking
+        "ALTER TABLE scan_status ADD COLUMN catalog_done INTEGER NOT NULL DEFAULT 0",
     ]
     for sql in migrations:
         try:
@@ -298,12 +317,28 @@ def get_all_user_webhooks() -> list[str]:
 # ── Detection helpers ──────────────────────────────────────────────────────────
 
 def upsert_detection(
-    source: str, file_path: str, title: str,
-    description: str, detection_logic: str, spl: str, rule_url: str,
+    source: str,
+    file_path: str,
+    title: str,
+    description: str,
+    detection_logic: str,
+    spl: str,
+    rule_url: str,
+    *,
+    mitre_techniques: str = "",
+    mitre_tactics: str = "",
+    author: str = "",
+    rule_status: str = "",
+    severity: str = "",
+    rule_date: str = "",
+    refs: str = "",
 ) -> bool:
     """
     Insert or update a detection row.
     Returns True if the row was brand-new (first time we've seen this file).
+
+    Extra metadata fields (MITRE, author, etc.) are keyword-only to make
+    call sites explicit. Existing callers that omit them get empty defaults.
     """
     ts = now_iso()
     with get_conn() as conn:
@@ -315,25 +350,49 @@ def upsert_detection(
             conn.execute(
                 """UPDATE detections
                    SET title=?, description=?, detection_logic=?, spl=?,
-                       rule_url=?, last_updated=?
+                       rule_url=?, last_updated=?,
+                       mitre_techniques=?, mitre_tactics=?,
+                       author=?, rule_status=?, severity=?, rule_date=?, refs=?
                    WHERE source=? AND file_path=?""",
-                (title, description, detection_logic, spl, rule_url, ts, source, file_path),
+                (
+                    title, description, detection_logic, spl, rule_url, ts,
+                    mitre_techniques, mitre_tactics,
+                    author, rule_status, severity, rule_date, refs,
+                    source, file_path,
+                ),
             )
             return False
         conn.execute(
             """INSERT INTO detections
                (source, file_path, title, description, detection_logic, spl,
-                rule_url, first_seen, last_updated)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (source, file_path, title, description, detection_logic, spl, rule_url, ts, ts),
+                rule_url, first_seen, last_updated,
+                mitre_techniques, mitre_tactics,
+                author, rule_status, severity, rule_date, refs)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,  ?, ?,  ?, ?, ?, ?, ?)""",
+            (
+                source, file_path, title, description, detection_logic, spl,
+                rule_url, ts, ts,
+                mitre_techniques, mitre_tactics,
+                author, rule_status, severity, rule_date, refs,
+            ),
         )
         return True
 
 
 def search_detections(
-    query: str = "", source: str = "", page: int = 1, per_page: int = 50
+    query: str = "",
+    source: str = "",
+    mitre: str = "",
+    page: int = 1,
+    per_page: int = 50,
 ) -> tuple[list[dict], int]:
-    """Full-text search across detections. Returns (rows, total_count)."""
+    """
+    Full-text search across detections.
+    - query  : searches title, description, detection_logic, spl
+    - source : 'sigma' | 'splunk' | '' (all)
+    - mitre  : searches mitre_techniques and mitre_tactics (e.g. 'T1059' or 'Execution')
+    Returns (rows, total_count).
+    """
     conditions, params = [], []
     if query:
         conditions.append(
@@ -344,6 +403,12 @@ def search_detections(
     if source:
         conditions.append("source = ?")
         params.append(source)
+    if mitre:
+        conditions.append(
+            "(mitre_techniques LIKE ? OR mitre_tactics LIKE ?)"
+        )
+        like = f"%{mitre}%"
+        params += [like, like]
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
@@ -358,6 +423,15 @@ def search_detections(
         ).fetchall()
 
     return [dict(r) for r in rows], total
+
+
+def get_existing_detection_paths(source: str) -> set[str]:
+    """Return the set of file_path values already stored for a given source."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT file_path FROM detections WHERE source = ?", (source,)
+        ).fetchall()
+        return {r["file_path"] for r in rows}
 
 
 # ── Update helpers ─────────────────────────────────────────────────────────────
@@ -442,6 +516,23 @@ def finish_scan(new_count: int, mod_count: int):
                SET last_scan=?, new_count=?, mod_count=?, is_scanning=0
                WHERE id=1""",
             (now_iso(), new_count, mod_count),
+        )
+
+
+def is_catalog_done() -> bool:
+    """Return True if the full catalog scan has been completed at least once."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT catalog_done FROM scan_status WHERE id = 1"
+        ).fetchone()
+        return bool(row["catalog_done"]) if row else False
+
+
+def mark_catalog_done():
+    """Record that the full catalog scan has been completed."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE scan_status SET catalog_done = 1 WHERE id = 1"
         )
 
 

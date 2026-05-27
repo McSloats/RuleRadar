@@ -2,14 +2,31 @@
 """
 RuleRadar web interface.
 
-Pages:
-  /detections   — searchable table of every known detection rule
-  /updates      — feed of new/modified rule events
-  /settings     — per-user: Discord webhook, saved filters, change password
-  /admin        — admin-only: GitHub token, user management
+Pages
+-----
+  /               → redirect to /detections (or /setup, /login)
+  /setup          → first-run admin account creation
+  /login, /logout → authentication
+  /setup-token    → mandatory token gate (shown before any page if no token is set)
+  /detections     → searchable table of every known detection rule
+  /updates        → feed of new/modified rule events
+  /settings       → per-user: password, Discord webhook, saved filters; also shows
+                    GitHub token status and scan schedule (read-only)
+  /admin          → admin-only: GitHub token management, user management
+  /admin/activity → admin-only: activity log
+
+Scan policy
+-----------
+  * Scans are NEVER triggered automatically by page loads or a "Scan Now" button.
+  * The first scan fires when the user submits a validated GitHub token on /setup-token.
+  * Subsequent scans are owned entirely by the scheduler process (scheduler.py),
+    which runs at every even UTC hour (00:00, 02:00, … 22:00).
+  * A 90-minute staleness guard in the scheduler prevents a double-scan immediately
+    after the initial token-submission scan.
 
 Auth: Flask-Login with bcrypt-hashed passwords.
       First visit redirects to /setup to create the initial admin account.
+      Any authenticated visit without a valid GitHub token redirects to /setup-token.
 """
 
 from __future__ import annotations
@@ -97,28 +114,55 @@ def admin_required(f):
     return decorated
 
 
-# ── Background scan ────────────────────────────────────────────────────────────
+# ── Token gate (before_request) ────────────────────────────────────────────────
 
-_STALE_MINUTES = 30
+# Endpoints that must remain reachable even when no token is configured.
+# This covers: auth flow, the token setup page itself, and status/health probes.
+_TOKEN_GATE_SKIP = {
+    "login", "logout", "setup",
+    "setup_token", "setup_token_validate", "setup_token_submit",
+    "api_scan_status",   # nav badge polls this even during token setup
+    "health", "static",
+    None,                # unknown endpoints (Flask internally generated)
+}
 
 
-def _maybe_trigger_scan(triggered_by: str = "system"):
+@app.before_request
+def require_github_token():
     """
-    Start a background scan if:
-      - no scan is currently running, AND
-      - the last scan finished more than _STALE_MINUTES ago (or never ran).
-    Returns immediately; actual work happens in a daemon thread.
+    Redirect authenticated users to /setup-token if no valid GitHub token is
+    stored in the database.  Unauthenticated users are handled by @login_required
+    on individual routes; this hook only enforces the token gate.
     """
-    status = db.get_scan_status()
-    if status.get("is_scanning"):
+    if request.endpoint in _TOKEN_GATE_SKIP:
         return
-    last = status.get("last_scan")
-    if last:
-        last_dt     = datetime.fromisoformat(last.replace("Z", "+00:00"))
-        age_minutes = (datetime.now(timezone.utc) - last_dt).total_seconds() / 60
-        if age_minutes < _STALE_MINUTES:
-            return
+    if not current_user.is_authenticated:
+        return  # @login_required will redirect them to /login
+    token = db.get_app_config("github_token")
+    if not ruleradar._is_real_token(token):
+        return redirect(url_for("setup_token"))
 
+
+# ── Scan scheduling helpers ────────────────────────────────────────────────────
+
+def _next_scheduled_scan() -> datetime:
+    """
+    Return the UTC datetime of the next even-hour scheduler fire.
+    The scheduler runs at 00:00, 02:00, 04:00 … 22:00 UTC.
+    """
+    now = datetime.now(timezone.utc)
+    # hours_to_add is always 1 or 2 — brings us to the next multiple-of-2 hour
+    hours_to_add = 2 - (now.hour % 2)
+    return (now + timedelta(hours=hours_to_add)).replace(
+        minute=0, second=0, microsecond=0
+    )
+
+
+def _start_background_scan(triggered_by: str):
+    """
+    Spawn a daemon thread to run a full scan cycle.
+    Used only by the token-submission flow; subsequent scans are scheduler-owned.
+    """
     def _run():
         try:
             ruleradar.run_scan(triggered_by=triggered_by)
@@ -129,7 +173,7 @@ def _maybe_trigger_scan(triggered_by: str = "system"):
 
 
 def _get_saved_filters() -> list[dict]:
-    """Return the current user's saved filter presets."""
+    """Return the current user's saved filter presets (empty list if not logged in)."""
     if not current_user.is_authenticated:
         return []
     settings = db.get_user_settings(current_user.id)
@@ -205,6 +249,78 @@ def logout():
     return redirect(url_for("login"))
 
 
+# ── GitHub token setup (mandatory gate) ────────────────────────────────────────
+
+@app.route("/setup-token")
+@login_required
+def setup_token():
+    """
+    Mandatory token setup page.  Any authenticated user without a valid GitHub
+    token configured is redirected here by require_github_token().  Once a
+    valid token is submitted via /setup-token/submit, the user is never sent
+    here again (unless an admin clears the token).
+    """
+    # If a valid token is already set, there is nothing to do here
+    token = db.get_app_config("github_token")
+    if ruleradar._is_real_token(token):
+        return redirect(url_for("detections"))
+    return render_template("setup_token.html")
+
+
+@app.route("/setup-token/validate", methods=["POST"])
+@login_required
+def setup_token_validate():
+    """
+    AJAX endpoint: test a GitHub token against the GitHub API without saving it.
+    Expects JSON body {"token": "ghp_..."}.
+    Returns JSON {"valid": bool, "limit": int, "remaining": int, "error": str}.
+    """
+    data  = request.get_json(silent=True) or {}
+    token = data.get("token", "").strip()
+    result = ruleradar.validate_token(token)
+    return jsonify(result)
+
+
+@app.route("/setup-token/submit", methods=["POST"])
+@login_required
+def setup_token_submit():
+    """
+    Save the submitted GitHub token (after the user has validated and confirmed),
+    then immediately launch the initial catalog scan in a background thread.
+    """
+    token = request.form.get("github_token", "").strip()
+
+    # Validate one more time server-side before persisting
+    result = ruleradar.validate_token(token)
+    if not result.get("valid"):
+        flash(
+            f"Token rejected: {result.get('error', 'unknown error')}. "
+            "Please go back and re-validate.",
+            "error",
+        )
+        return redirect(url_for("setup_token"))
+
+    db.set_app_config("github_token", token)
+    db.log_activity(
+        "admin",
+        "GitHub token configured via setup-token page",
+        actor=current_user.username,
+        detail=f"rate_limit={result.get('limit')}/hr",
+    )
+
+    # Kick off the initial scan (catalog + incremental) in the background.
+    # The scheduler's 90-minute staleness guard ensures it won't double-scan.
+    _start_background_scan(triggered_by=f"{current_user.username} (initial setup)")
+
+    flash(
+        "Token saved and verified! The initial scan has started — it will index all "
+        "rules from SigmaHQ/sigma and splunk/security_content. "
+        "This may take a few minutes. Check the scan status badge in the top bar.",
+        "success",
+    )
+    return redirect(url_for("detections"))
+
+
 # ── Main pages ─────────────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -219,20 +335,26 @@ def index():
 @app.route("/detections")
 @login_required
 def detections():
-    _maybe_trigger_scan(triggered_by=f"{current_user.username} (page load)")
+    """
+    Searchable table of all known detection rules.
+    No scan is triggered here — scans are scheduler-owned.
+    """
     q        = request.args.get("q", "").strip()
     source   = request.args.get("source", "")
+    mitre    = request.args.get("mitre", "").strip()
     page     = max(1, int(request.args.get("page", 1) or 1))
     per_page = 50
 
-    rows, total = db.search_detections(query=q, source=source, page=page, per_page=per_page)
+    rows, total = db.search_detections(
+        query=q, source=source, mitre=mitre, page=page, per_page=per_page
+    )
     total_pages = max(1, (total + per_page - 1) // per_page)
 
     return render_template(
         "detections.html",
         rows=rows, total=total,
         page=page, total_pages=total_pages,
-        q=q, source=source,
+        q=q, source=source, mitre=mitre,
         saved_filters=_get_saved_filters(),
     )
 
@@ -240,7 +362,10 @@ def detections():
 @app.route("/updates")
 @login_required
 def updates():
-    _maybe_trigger_scan(triggered_by=f"{current_user.username} (page load)")
+    """
+    Feed of new/modified rule events.
+    No scan is triggered here — scans are scheduler-owned.
+    """
     source      = request.args.get("source", "")
     change_type = request.args.get("change_type", "")
     page        = max(1, int(request.args.get("page", 1) or 1))
@@ -267,14 +392,44 @@ def updates():
 @app.route("/settings")
 @login_required
 def settings():
+    """
+    Per-user settings page.  Also shows the global GitHub token status and the
+    scan schedule so users can see when the last and next scans occur.
+    """
     user_settings = db.get_user_settings(current_user.id)
     try:
         saved_filters = json.loads(user_settings.get("saved_filters", "[]"))
     except (json.JSONDecodeError, TypeError):
         saved_filters = []
-    return render_template("settings.html",
-                           user_settings=user_settings,
-                           saved_filters=saved_filters)
+
+    # Token display (masked) — global setting, same for all users
+    github_token  = db.get_app_config("github_token")
+    token_display = ""
+    if github_token:
+        # Show first 8 chars + dots + last 4 chars for recognition without exposure
+        if len(github_token) > 12:
+            token_display = github_token[:8] + "●" * 8 + github_token[-4:]
+        else:
+            token_display = github_token[:4] + "●" * max(0, len(github_token) - 4)
+
+    # Scan schedule
+    status    = db.get_scan_status()
+    last_scan = status.get("last_scan")
+    last_scan_display = (
+        last_scan[:19].replace("T", " ") + " UTC" if last_scan else "No scan yet"
+    )
+    next_scan_dt      = _next_scheduled_scan()
+    next_scan_display = next_scan_dt.strftime("%Y-%m-%d %H:%M UTC")
+
+    return render_template(
+        "settings.html",
+        user_settings=user_settings,
+        saved_filters=saved_filters,
+        token_display=token_display,
+        token_is_set=ruleradar._is_real_token(github_token),
+        last_scan_display=last_scan_display,
+        next_scan_display=next_scan_display,
+    )
 
 
 @app.route("/settings/password", methods=["POST"])
@@ -346,6 +501,7 @@ def settings_filters_add():
     source      = request.form.get("source", "")
     change_type = request.form.get("change_type", "")
     q           = request.form.get("q", "").strip()
+    mitre       = request.form.get("mitre", "").strip()
 
     if not name:
         flash("Filter name is required.", "error")
@@ -368,11 +524,15 @@ def settings_filters_add():
         "source":      source,
         "change_type": change_type,
         "q":           q,
+        "mitre":       mitre,
     })
     db.update_user_filters(current_user.id, json.dumps(filters))
     db.log_activity("user", f"Saved filter '{name}' added",
                     actor=current_user.username,
-                    detail=f"source={source or 'all'}, change_type={change_type or 'all'}, q={q or ''}")
+                    detail=(
+                        f"source={source or 'all'}, change_type={change_type or 'all'}, "
+                        f"q={q or ''}, mitre={mitre or ''}"
+                    ))
     flash(f"Filter \"{name}\" saved.", "success")
     return redirect(url_for("settings"))
 
@@ -404,11 +564,13 @@ def settings_filters_delete():
 def admin():
     users        = db.get_all_users()
     github_token = db.get_app_config("github_token")
-    # Mask token for display: show prefix + dots
+    # Mask token for display: show prefix + dots + last 4 chars
     token_display = ""
     if github_token:
-        visible = github_token[:8] if len(github_token) >= 8 else github_token
-        token_display = visible + "●" * max(0, len(github_token) - 8)
+        if len(github_token) > 12:
+            token_display = github_token[:8] + "●" * 8 + github_token[-4:]
+        else:
+            token_display = github_token[:4] + "●" * max(0, len(github_token) - 4)
     return render_template("admin.html",
                            users=users,
                            github_token=github_token,
@@ -526,12 +688,21 @@ def admin_delete_user(user_id: int):
 
 # ── API ────────────────────────────────────────────────────────────────────────
 
-@app.route("/api/scan/trigger", methods=["POST"])
+@app.route("/api/scan/status")
 @login_required
-def api_scan_trigger():
-    _maybe_trigger_scan(triggered_by=f"{current_user.username} (manual)")
-    return jsonify({"queued": True})
+def api_scan_status():
+    """
+    Returns the current scan status as JSON.
+    Polled every 15 s by the nav-bar badge (layout.html).
+    Also includes the next scheduled scan time for informational display.
+    """
+    status = db.get_scan_status()
+    result = dict(status)
+    result["next_scan"] = _next_scheduled_scan().isoformat()
+    return jsonify(result)
 
+
+# ── Admin activity log ─────────────────────────────────────────────────────────
 
 @app.route("/admin/activity")
 @admin_required
@@ -557,11 +728,7 @@ def admin_activity():
     )
 
 
-@app.route("/api/scan/status")
-@login_required
-def api_scan_status():
-    return jsonify(db.get_scan_status())
-
+# ── Health check ───────────────────────────────────────────────────────────────
 
 @app.route("/health")
 def health():

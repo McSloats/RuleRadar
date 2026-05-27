@@ -5,7 +5,6 @@
 
 <div class="page-header">
   <h2>Detections</h2>
-  <button id="scan-btn" class="btn btn-scan" onclick="manualScan(this)">↻ Scan Now</button>
 </div>
 
 {# ── Saved filter presets ─────────────────────────────────────────────────── #}
@@ -14,8 +13,8 @@
   <span class="preset-label">Quick filters:</span>
   {% for f in saved_filters %}
   <a class="preset-btn"
-     href="{{ url_for('detections', source=f.source, q=f.q) }}"
-     title="Source: {{ f.source or 'all' }} | Query: {{ f.q or 'none' }}">
+     href="{{ url_for('detections', source=f.source, q=f.q, mitre=f.get('mitre', '')) }}"
+     title="Source: {{ f.source or 'all' }} | Query: {{ f.q or 'none' }}{% if f.get('mitre') %} | MITRE: {{ f.mitre }}{% endif %}">
     {{ f.name }}
   </a>
   {% endfor %}
@@ -31,8 +30,11 @@
     <option value="sigma"  {% if source == 'sigma'   %}selected{% endif %}>Sigma</option>
     <option value="splunk" {% if source == 'splunk'  %}selected{% endif %}>Splunk</option>
   </select>
+  <input type="text" name="mitre" value="{{ mitre }}"
+         placeholder="MITRE (e.g. T1059, Execution)"
+         style="min-width:190px;">
   <button type="submit" class="btn btn-primary">Search</button>
-  {% if q or source %}
+  {% if q or source or mitre %}
     <a href="{{ url_for('detections') }}" class="btn btn-secondary">Clear</a>
   {% endif %}
 </form>
@@ -41,6 +43,7 @@
   {{ total }} detection{{ 's' if total != 1 else '' }}
   {% if q %} matching <strong>{{ q }}</strong>{% endif %}
   {% if source %} in <strong>{{ source }}</strong>{% endif %}
+  {% if mitre %} with MITRE <strong>{{ mitre }}</strong>{% endif %}
 </p>
 
 {# ── Results table ────────────────────────────────────────────────────────── #}
@@ -51,7 +54,8 @@
       <tr>
         <th style="width:22px;"></th>
         <th>Title</th>
-        <th style="width:80px;">Source</th>
+        <th style="width:175px;">MITRE TTPs</th>
+        <th style="width:75px;">Source</th>
         <th>Description</th>
         <th style="width:140px;">Last Updated</th>
         <th style="width:70px;">Link</th>
@@ -59,10 +63,30 @@
     </thead>
     <tbody>
       {% for row in rows %}
+
       {# ── Data row ── #}
       <tr class="data-row" onclick="toggleDetail(this)">
         <td><span class="expand-arrow">▶</span></td>
-        <td><strong>{{ row.title }}</strong></td>
+        <td>
+          <strong>{{ row.title }}</strong>
+          {% if row.severity %}
+            <span class="badge badge-sev-{{ row.severity | lower }}"
+                  style="margin-left:0.3rem; font-size:0.68rem; vertical-align:middle;">
+              {{ row.severity }}
+            </span>
+          {% endif %}
+        </td>
+        <td onclick="event.stopPropagation()" class="mitre-cell">
+          {% if row.mitre_techniques %}
+            {% for tech in row.mitre_techniques.split('|') %}
+              <a href="{{ url_for('detections', mitre=tech) }}"
+                 class="badge badge-mitre"
+                 title="Filter by {{ tech }}">{{ tech }}</a>
+            {% endfor %}
+          {% else %}
+            <span class="text-muted text-small">—</span>
+          {% endif %}
+        </td>
         <td><span class="badge badge-{{ row.source }}">{{ row.source }}</span></td>
         <td class="trunc text-muted">{{ row.description }}</td>
         <td class="nowrap text-muted text-small">
@@ -78,27 +102,90 @@
 
       {# ── Expandable detail row ── #}
       <tr class="detail-row">
-        <td colspan="6">
+        <td colspan="7">
+
+          {# Meta row: author / status / date #}
+          {% if row.author or row.rule_status or row.rule_date %}
+          <div class="detail-meta">
+            {% if row.author %}
+              <span><span class="detail-label">Author</span> {{ row.author }}</span>
+            {% endif %}
+            {% if row.rule_status %}
+              <span><span class="detail-label">Status</span>
+                <span class="badge badge-{{ row.rule_status | lower }}">{{ row.rule_status }}</span>
+              </span>
+            {% endif %}
+            {% if row.rule_date %}
+              <span><span class="detail-label">Date</span> {{ row.rule_date }}</span>
+            {% endif %}
+          </div>
+          {% endif %}
+
+          {# MITRE full detail #}
+          {% if row.mitre_techniques or row.mitre_tactics %}
+          <div class="detail-mitre">
+            {% if row.mitre_techniques %}
+              <span class="detail-label">Techniques</span>
+              {% for tech in row.mitre_techniques.split('|') %}
+                <a href="{{ url_for('detections', mitre=tech) }}"
+                   class="badge badge-mitre">{{ tech }}</a>
+              {% endfor %}
+            {% endif %}
+            {% if row.mitre_tactics %}
+              <span class="detail-label" style="margin-left:0.75rem;">Tactics</span>
+              {% for tac in row.mitre_tactics.split('|') %}
+                <a href="{{ url_for('detections', mitre=tac) }}"
+                   class="badge badge-tactic">{{ tac }}</a>
+              {% endfor %}
+            {% endif %}
+          </div>
+          {% endif %}
+
+          {# Description #}
           {% if row.description %}
-            <p class="detail-label">Description</p>
+            <p class="detail-label" style="margin-top:0.6rem;">Description</p>
             <p class="detail-text">{{ row.description }}</p>
           {% endif %}
 
+          {# Detection Logic #}
           {% if row.detection_logic %}
             <p class="detail-label">Detection Logic</p>
             <pre>{{ row.detection_logic }}</pre>
           {% endif %}
 
+          {# Splunk SPL #}
           {% if row.spl %}
             <p class="detail-label">Splunk SPL</p>
             <pre>{{ row.spl }}</pre>
           {% endif %}
 
-          {% if not row.description and not row.detection_logic and not row.spl %}
+          {# References #}
+          {% if row.refs %}
+            <p class="detail-label">References</p>
+            <ul class="detail-refs">
+              {% for ref in row.refs.split('\n') %}
+                {% if ref.strip() %}
+                  <li>
+                    {% if ref.strip().startswith('http') %}
+                      <a href="{{ ref.strip() }}" target="_blank" rel="noopener"
+                         class="text-small">{{ ref.strip() }}</a>
+                    {% else %}
+                      <span class="text-small">{{ ref.strip() }}</span>
+                    {% endif %}
+                  </li>
+                {% endif %}
+              {% endfor %}
+            </ul>
+          {% endif %}
+
+          {% if not row.description and not row.detection_logic and not row.spl
+                and not row.mitre_techniques and not row.refs %}
             <p class="detail-text text-muted">No additional details available.</p>
           {% endif %}
+
         </td>
       </tr>
+
       {% endfor %}
     </tbody>
   </table>
@@ -110,8 +197,8 @@
   <span class="pg-info">Page {{ page }} of {{ total_pages }}</span>
 
   {% if page > 1 %}
-    <a href="{{ url_for('detections', q=q, source=source, page=1) }}">«</a>
-    <a href="{{ url_for('detections', q=q, source=source, page=page-1) }}">‹ Prev</a>
+    <a href="{{ url_for('detections', q=q, source=source, mitre=mitre, page=1) }}">«</a>
+    <a href="{{ url_for('detections', q=q, source=source, mitre=mitre, page=page-1) }}">‹ Prev</a>
   {% endif %}
 
   {% set start_pg = [1, page - 2] | max %}
@@ -120,13 +207,13 @@
     {% if p == page %}
       <span class="pg-current">{{ p }}</span>
     {% else %}
-      <a href="{{ url_for('detections', q=q, source=source, page=p) }}">{{ p }}</a>
+      <a href="{{ url_for('detections', q=q, source=source, mitre=mitre, page=p) }}">{{ p }}</a>
     {% endif %}
   {% endfor %}
 
   {% if page < total_pages %}
-    <a href="{{ url_for('detections', q=q, source=source, page=page+1) }}">Next ›</a>
-    <a href="{{ url_for('detections', q=q, source=source, page=total_pages) }}">»</a>
+    <a href="{{ url_for('detections', q=q, source=source, mitre=mitre, page=page+1) }}">Next ›</a>
+    <a href="{{ url_for('detections', q=q, source=source, mitre=mitre, page=total_pages) }}">»</a>
   {% endif %}
 </div>
 {% endif %}
@@ -134,10 +221,10 @@
 {% else %}
 <div class="empty-state">
   <p>
-    {% if q or source %}
+    {% if q or source or mitre %}
       No detections found matching your filters.
     {% else %}
-      No detections in the database yet.<br>Click <strong>↻ Scan Now</strong> to run the first scan.
+      No detections in the database yet.<br>The initial scan is running in the background — check back shortly.
     {% endif %}
   </p>
 </div>
@@ -150,22 +237,6 @@ function toggleDetail(row) {
   const open   = detail.style.display !== 'table-row';
   detail.style.display = open ? 'table-row' : 'none';
   arrow.textContent = open ? '▼' : '▶';
-}
-
-async function manualScan(btn) {
-  btn.disabled = true;
-  btn.textContent = '↻ Scanning…';
-  try {
-    await fetch('/api/scan/trigger', { method: 'POST' });
-    btn.textContent = '↻ Scan queued';
-    setTimeout(() => {
-      btn.textContent = '↻ Scan Now';
-      btn.disabled = false;
-    }, 5000);
-  } catch (_) {
-    btn.textContent = '↻ Scan Now';
-    btn.disabled = false;
-  }
 }
 </script>
 
