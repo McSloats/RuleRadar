@@ -1,0 +1,31 @@
+<svg viewBox="0 0 44 48" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="RuleRadar">
+  <defs>
+    <clipPath id="shield-clip">
+      <path d="M22 3 L39 10 L39 25 C39 37 30 44 22 47 C14 44 5 37 5 25 L5 10 Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- Shield body -->
+  <path d="M22 3 L39 10 L39 25 C39 37 30 44 22 47 C14 44 5 37 5 25 L5 10 Z"
+        fill="#1e1040" stroke="#d4a017" stroke-width="2" stroke-linejoin="round"/>
+
+  <!-- Radar rings + sweep (clipped to shield shape) -->
+  <g clip-path="url(#shield-clip)">
+    <circle cx="22" cy="28" r="14" stroke="#2b1e4a" stroke-width="1.2" fill="none"/>
+    <circle cx="22" cy="28" r="9"  stroke="#2b1e4a" stroke-width="1.2" fill="none"/>
+    <circle cx="22" cy="28" r="4"  stroke="#2b1e4a" stroke-width="1.2" fill="none"/>
+
+    <!-- Sweep wedge (golden fill, low opacity) -->
+    <path d="M22 28 L22 14 A14 14 0 0 1 34.12 21 Z" fill="#d4a017" opacity="0.18"/>
+
+    <!-- Sweep line -->
+    <line x1="22" y1="28" x2="34.12" y2="21"
+          stroke="#d4a017" stroke-width="2" stroke-linecap="round"/>
+
+    <!-- Blip (detection contact) -->
+    <circle cx="27.5" cy="18.5" r="2.2" fill="#d4a017"/>
+  </g>
+
+  <!-- Centre dot (drawn above clip so it's always visible) -->
+  <circle cx="22" cy="28" r="2" fill="#d4a017"/>
+</svg>

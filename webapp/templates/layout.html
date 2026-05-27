@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}RuleRadar{% endblock %}</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
   <style>
     /*
      * RuleRadar — dark purple + dark yellow theme
@@ -42,12 +43,20 @@
       z-index: 100;
     }
     .nav-brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
       font-weight: 700;
       font-size: 1rem;
       color: #d4a017;
       text-decoration: none;
       letter-spacing: 0.02em;
       white-space: nowrap;
+    }
+    .nav-icon {
+      width: 26px;
+      height: 26px;
+      flex-shrink: 0;
     }
     .nav-link {
       color: #9080b8;
@@ -490,7 +499,10 @@
 
 {% if current_user.is_authenticated %}
 <nav>
-  <a class="nav-brand" href="{{ url_for('index') }}">📡 RuleRadar</a>
+  <a class="nav-brand" href="{{ url_for('index') }}">
+    <img src="{{ url_for('static', filename='icon.svg') }}" class="nav-icon" alt="">
+    RuleRadar
+  </a>
   <a class="nav-link {% if request.endpoint == 'detections' %}active{% endif %}"
      href="{{ url_for('detections') }}">Detections</a>
   <a class="nav-link {% if request.endpoint == 'updates' %}active{% endif %}"

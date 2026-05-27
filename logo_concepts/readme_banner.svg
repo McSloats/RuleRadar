@@ -1,0 +1,61 @@
+<svg viewBox="0 0 640 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="RuleRadar">
+
+  <!-- Background -->
+  <rect width="640" height="160" rx="12" fill="#0d0a18"/>
+  <!-- Top border accent -->
+  <rect width="640" height="3" rx="0" fill="#d4a017" opacity="0.6"/>
+
+  <!-- ── Shield icon (scaled up, centred vertically) ────────────────────── -->
+  <defs>
+    <clipPath id="banner-shield">
+      <path d="M80 18 L110 31 L110 70 C110 93 96 108 80 115 C64 108 50 93 50 70 L50 31 Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- Shield body -->
+  <path d="M80 18 L110 31 L110 70 C110 93 96 108 80 115 C64 108 50 93 50 70 L50 31 Z"
+        fill="#1e1040" stroke="#d4a017" stroke-width="3" stroke-linejoin="round"/>
+
+  <!-- Radar rings (clipped) -->
+  <g clip-path="url(#banner-shield)">
+    <circle cx="80" cy="76" r="34" stroke="#2b1e4a" stroke-width="1.8" fill="none"/>
+    <circle cx="80" cy="76" r="22" stroke="#2b1e4a" stroke-width="1.8" fill="none"/>
+    <circle cx="80" cy="76" r="10" stroke="#2b1e4a" stroke-width="1.8" fill="none"/>
+
+    <!-- Sweep wedge -->
+    <path d="M80 76 L80 42 A34 34 0 0 1 109.44 59 Z" fill="#d4a017" opacity="0.17"/>
+
+    <!-- Sweep line -->
+    <line x1="80" y1="76" x2="109.44" y2="59"
+          stroke="#d4a017" stroke-width="3" stroke-linecap="round"/>
+
+    <!-- Blip -->
+    <circle cx="94" cy="51" r="4.5" fill="#d4a017"/>
+  </g>
+
+  <!-- Centre dot -->
+  <circle cx="80" cy="76" r="4" fill="#d4a017"/>
+
+  <!-- ── Wordmark ─────────────────────────────────────────────────────────── -->
+  <text x="138" y="88"
+        font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+        font-size="46" font-weight="800" letter-spacing="-1"
+        fill="#d4a017">RuleRadar</text>
+
+  <!-- ── Tagline ─────────────────────────────────────────────────────────── -->
+  <text x="140" y="115"
+        font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+        font-size="15" font-weight="400" letter-spacing="0.3"
+        fill="#6a5888">Security detection monitor — SigmaHQ · Splunk · git-native scanning</text>
+
+  <!-- ── Decorative ring (bottom-right corner) ───────────────────────────── -->
+  <circle cx="610" cy="140" r="60" stroke="#2b1e4a" stroke-width="1.2" fill="none" opacity="0.5"/>
+  <circle cx="610" cy="140" r="40" stroke="#2b1e4a" stroke-width="1.2" fill="none" opacity="0.4"/>
+  <circle cx="610" cy="140" r="20" stroke="#2b1e4a" stroke-width="1.2" fill="none" opacity="0.3"/>
+  <!-- Mini sweep in corner -->
+  <path d="M610 140 L610 80 A60 60 0 0 1 661.96 110 Z" fill="#d4a017" opacity="0.07"/>
+  <line x1="610" y1="140" x2="661.96" y2="110"
+        stroke="#d4a017" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+  <circle cx="640" cy="95" r="3" fill="#d4a017" opacity="0.5"/>
+
+</svg>

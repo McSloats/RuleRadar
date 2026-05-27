@@ -1,0 +1,28 @@
+<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="RuleRadar">
+  <!-- Rounded square background -->
+  <rect width="48" height="48" rx="9" fill="#160f2a"/>
+
+  <defs>
+    <clipPath id="fav-shield-clip">
+      <path d="M24 3 L41 10.5 L41 26 C41 38 32 45 24 47.5 C16 45 7 38 7 26 L7 10.5 Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- Shield body -->
+  <path d="M24 3 L41 10.5 L41 26 C41 38 32 45 24 47.5 C16 45 7 38 7 26 L7 10.5 Z"
+        fill="#1e1040" stroke="#d4a017" stroke-width="2" stroke-linejoin="round"/>
+
+  <!-- Radar rings + sweep -->
+  <g clip-path="url(#fav-shield-clip)">
+    <circle cx="24" cy="29" r="14" stroke="#2b1e4a" stroke-width="1.3" fill="none"/>
+    <circle cx="24" cy="29" r="9"  stroke="#2b1e4a" stroke-width="1.3" fill="none"/>
+    <circle cx="24" cy="29" r="4"  stroke="#2b1e4a" stroke-width="1.3" fill="none"/>
+
+    <path d="M24 29 L24 15 A14 14 0 0 1 36.12 22 Z" fill="#d4a017" opacity="0.18"/>
+    <line x1="24" y1="29" x2="36.12" y2="22"
+          stroke="#d4a017" stroke-width="2" stroke-linecap="round"/>
+    <circle cx="29.5" cy="19.5" r="2.2" fill="#d4a017"/>
+  </g>
+
+  <circle cx="24" cy="29" r="2" fill="#d4a017"/>
+</svg>
