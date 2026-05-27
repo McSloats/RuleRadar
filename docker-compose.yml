@@ -1,0 +1,30 @@
+services:
+
+  # ── Web interface ─────────────────────────────────────────────────────────────
+  web:
+    build: .
+    container_name: ruleradar-web
+    ports:
+      - "5000:5000"
+    volumes:
+      # Mount config read-only so credentials are never baked into the image
+      - ./config.json:/app/config.json:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ── Daily scheduler ───────────────────────────────────────────────────────────
+  scheduler:
+    build: .
+    container_name: ruleradar-scheduler
+    command: ["python3", "scheduler.py"]
+    volumes:
+      - ./config.json:/app/config.json:ro
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
