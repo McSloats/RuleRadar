@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="webapp/static/icon.svg" width="80" height="87" alt="">
+</p>
+
 # RuleRadar
 
 Monitors [SigmaHQ/sigma](https://github.com/SigmaHQ/sigma) and [splunk/security_content](https://github.com/splunk/security_content) for new and modified detection rules. All data is stored in a local SQLite database and browsable through a built-in web interface. No config files required — everything is configured through the web UI.
