@@ -1,7 +1,4 @@
 {
   "github_token": "PASTE_YOUR_GITHUB_TOKEN_HERE",
-  "discord_webhook_url": "PASTE_YOUR_DISCORD_WEBHOOK_URL_HERE",
-  "github_reports_owner": "PASTE_YOUR_GITHUB_USERNAME_HERE",
-  "github_reports_repo": "PASTE_REPORTS_REPO_NAME_HERE",
-  "github_reports_branch": "main"
+  "discord_webhook_url": "PASTE_YOUR_DISCORD_WEBHOOK_URL_HERE"
 }

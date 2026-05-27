@@ -19,6 +19,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the project
 COPY . .
 
+# Create the data directory where the SQLite DB and secret key are stored.
+# The docker-compose volume is mounted here, so both containers share the DB.
+RUN mkdir -p /app/data
+
 # Web service listens on 5000
 EXPOSE 5000
 

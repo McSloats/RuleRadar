@@ -1,0 +1,29 @@
+{% extends "layout.html" %}
+{% block title %}Setup — RuleRadar{% endblock %}
+
+{% block content %}
+<div class="auth-card">
+  <h1>📡 RuleRadar Setup</h1>
+  <p class="subtitle">Create your admin account to get started.<br>
+     This page is disabled once an account exists.</p>
+
+  <form method="post" autocomplete="off">
+    <div class="form-field">
+      <label for="username">Username</label>
+      <input type="text" id="username" name="username"
+             autocomplete="off" autofocus>
+    </div>
+    <div class="form-field">
+      <label for="password">Password <span class="text-muted">(min 8 characters)</span></label>
+      <input type="password" id="password" name="password"
+             autocomplete="new-password">
+    </div>
+    <div class="form-field">
+      <label for="confirm">Confirm Password</label>
+      <input type="password" id="confirm" name="confirm"
+             autocomplete="new-password">
+    </div>
+    <button type="submit" class="btn btn-primary btn-full">Create Account</button>
+  </form>
+</div>
+{% endblock %}

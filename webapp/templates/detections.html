@@ -1,0 +1,158 @@
+{% extends "layout.html" %}
+{% block title %}Detections — RuleRadar{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+  <h2>Detections</h2>
+  <button id="scan-btn" class="btn btn-scan" onclick="manualScan(this)">↻ Scan Now</button>
+</div>
+
+{# ── Filter form ──────────────────────────────────────────────────────────── #}
+<form method="get" action="{{ url_for('detections') }}" class="filter-form">
+  <input type="text" name="q" value="{{ q }}"
+         placeholder="Search title, description, logic, SPL…">
+  <select name="source">
+    <option value=""       {% if not source          %}selected{% endif %}>All Sources</option>
+    <option value="sigma"  {% if source == 'sigma'   %}selected{% endif %}>Sigma</option>
+    <option value="splunk" {% if source == 'splunk'  %}selected{% endif %}>Splunk</option>
+  </select>
+  <button type="submit" class="btn btn-primary">Search</button>
+  {% if q or source %}
+    <a href="{{ url_for('detections') }}" class="btn btn-secondary">Clear</a>
+  {% endif %}
+</form>
+
+<p class="result-count">
+  {{ total }} detection{{ 's' if total != 1 else '' }}
+  {% if q %} matching <strong>{{ q }}</strong>{% endif %}
+  {% if source %} in <strong>{{ source }}</strong>{% endif %}
+</p>
+
+{# ── Results table ────────────────────────────────────────────────────────── #}
+{% if rows %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th style="width:22px;"></th>
+        <th>Title</th>
+        <th style="width:80px;">Source</th>
+        <th>Description</th>
+        <th style="width:140px;">Last Updated</th>
+        <th style="width:70px;">Link</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      {# ── Data row ── #}
+      <tr class="data-row" onclick="toggleDetail(this)">
+        <td><span class="expand-arrow">▶</span></td>
+        <td><strong>{{ row.title }}</strong></td>
+        <td><span class="badge badge-{{ row.source }}">{{ row.source }}</span></td>
+        <td class="trunc text-muted">{{ row.description }}</td>
+        <td class="nowrap text-muted text-small">
+          {{ row.last_updated[:16].replace('T', ' ') if row.last_updated else '—' }}
+        </td>
+        <td onclick="event.stopPropagation()">
+          {% if row.rule_url %}
+            <a href="{{ row.rule_url }}" target="_blank" rel="noopener"
+               class="text-small">GitHub ↗</a>
+          {% endif %}
+        </td>
+      </tr>
+
+      {# ── Expandable detail row ── #}
+      <tr class="detail-row">
+        <td colspan="6">
+          {% if row.description %}
+            <p class="detail-label">Description</p>
+            <p class="detail-text">{{ row.description }}</p>
+          {% endif %}
+
+          {% if row.detection_logic %}
+            <p class="detail-label">Detection Logic</p>
+            <pre>{{ row.detection_logic }}</pre>
+          {% endif %}
+
+          {% if row.spl %}
+            <p class="detail-label">Splunk SPL</p>
+            <pre>{{ row.spl }}</pre>
+          {% endif %}
+
+          {% if not row.description and not row.detection_logic and not row.spl %}
+            <p class="detail-text text-muted">No additional details available.</p>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# ── Pagination ───────────────────────────────────────────────────────────── #}
+{% if total_pages > 1 %}
+<div class="pagination">
+  <span class="pg-info">Page {{ page }} of {{ total_pages }}</span>
+
+  {% if page > 1 %}
+    <a href="{{ url_for('detections', q=q, source=source, page=1) }}">«</a>
+    <a href="{{ url_for('detections', q=q, source=source, page=page-1) }}">‹ Prev</a>
+  {% endif %}
+
+  {% set start_pg = [1, page - 2] | max %}
+  {% set end_pg   = [total_pages, page + 2] | min %}
+  {% for p in range(start_pg, end_pg + 1) %}
+    {% if p == page %}
+      <span class="pg-current">{{ p }}</span>
+    {% else %}
+      <a href="{{ url_for('detections', q=q, source=source, page=p) }}">{{ p }}</a>
+    {% endif %}
+  {% endfor %}
+
+  {% if page < total_pages %}
+    <a href="{{ url_for('detections', q=q, source=source, page=page+1) }}">Next ›</a>
+    <a href="{{ url_for('detections', q=q, source=source, page=total_pages) }}">»</a>
+  {% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state">
+  <p>
+    {% if q or source %}
+      No detections found matching your filters.
+    {% else %}
+      No detections in the database yet.<br>Click <strong>↻ Scan Now</strong> to run the first scan.
+    {% endif %}
+  </p>
+</div>
+{% endif %}
+
+<script>
+function toggleDetail(row) {
+  const detail = row.nextElementSibling;
+  const arrow  = row.querySelector('.expand-arrow');
+  const open   = detail.style.display !== 'table-row';
+  detail.style.display = open ? 'table-row' : 'none';
+  arrow.textContent = open ? '▼' : '▶';
+}
+
+async function manualScan(btn) {
+  btn.disabled = true;
+  btn.textContent = '↻ Scanning…';
+  try {
+    await fetch('/api/scan/trigger', { method: 'POST' });
+    btn.textContent = '↻ Scan queued';
+    setTimeout(() => {
+      btn.textContent = '↻ Scan Now';
+      btn.disabled = false;
+    }, 5000);
+  } catch (_) {
+    btn.textContent = '↻ Scan Now';
+    btn.disabled = false;
+  }
+}
+</script>
+
+{% endblock %}

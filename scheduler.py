@@ -1,44 +1,50 @@
 #!/usr/bin/env python3
 """
-RuleRadar scheduler — runs ruleradar.py daily at 8:00 AM Eastern Time.
-Designed to run as a long-lived Docker container alongside the web service.
-Uses APScheduler so no system cron is needed inside the container.
+RuleRadar scheduler — runs a scan every hour.
+Imports run_scan() directly from ruleradar (no subprocess overhead).
+Safe to run alongside the web service; threading.Lock in ruleradar
+prevents overlapping scans if the webapp also triggers one.
 """
 
-import subprocess
 import sys
 from pathlib import Path
 
-import pytz
+# Allow importing from the project root
+sys.path.insert(0, str(Path(__file__).parent))
+
+import database as db
+import ruleradar
+
 from apscheduler.schedulers.blocking import BlockingScheduler
-from apscheduler.triggers.cron import CronTrigger
-
-SCRIPT = Path(__file__).parent / "ruleradar.py"
-ET     = pytz.timezone("America/New_York")
+from apscheduler.triggers.interval import IntervalTrigger
 
 
-def run_ruleradar():
-    print(">>> Starting RuleRadar run…", flush=True)
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT)],
-        capture_output=False,
-    )
-    if result.returncode == 0:
-        print(">>> RuleRadar completed successfully.", flush=True)
+def run_job():
+    print(">>> Scheduler: starting hourly RuleRadar scan…", flush=True)
+    result = ruleradar.run_scan()
+    if result.get("skipped"):
+        print(">>> Scheduler: scan skipped (already in progress).", flush=True)
+    elif result.get("error"):
+        print(f">>> Scheduler: scan error — {result['error']}", flush=True)
     else:
-        print(f">>> RuleRadar exited with code {result.returncode}.", flush=True)
+        print(
+            f">>> Scheduler: done — new={result['new']}  modified={result['modified']}",
+            flush=True,
+        )
 
 
 if __name__ == "__main__":
-    scheduler = BlockingScheduler(timezone=ET)
+    db.init_db()
+
+    scheduler = BlockingScheduler()
     scheduler.add_job(
-        run_ruleradar,
-        CronTrigger(hour=8, minute=0, timezone=ET),
-        id="ruleradar_daily",
-        name="RuleRadar daily run",
+        run_job,
+        IntervalTrigger(hours=1),
+        id="ruleradar_hourly",
+        name="RuleRadar hourly scan",
     )
 
-    print("RuleRadar scheduler started — will run daily at 08:00 ET.", flush=True)
+    print("RuleRadar scheduler started — scanning every hour.", flush=True)
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):

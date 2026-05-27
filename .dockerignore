@@ -10,8 +10,10 @@ __pycache__/
 *.pyc
 *.pyo
 
-# Runtime files
+# Runtime / generated files
 monitor_log.txt
+ruleradar.db
+.secret_key
 
 # Secrets — config.json is mounted at runtime, never baked in
 config.json

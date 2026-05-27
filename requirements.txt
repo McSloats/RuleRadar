@@ -2,9 +2,10 @@
 pyyaml
 pySigma-backend-splunk
 
-# Web interface
+# Web interface + auth
 flask
+flask-login
+bcrypt
 
-# Scheduler (Docker container replacement for cron)
+# Scheduler (replaces OS cron inside Docker / locally)
 APScheduler>=3.10,<4.0
-pytz

@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}RuleRadar{% endblock %}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    /* ── Navbar ── */
+    nav {
+      background: #161b27;
+      border-bottom: 1px solid #2d3748;
+      padding: 0 1.5rem;
+      height: 52px;
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .nav-brand {
+      font-weight: 700;
+      font-size: 1rem;
+      color: #63b3ed;
+      text-decoration: none;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    .nav-link {
+      color: #a0aec0;
+      text-decoration: none;
+      padding: 0.3rem 0.6rem;
+      border-radius: 5px;
+      font-size: 0.9rem;
+      transition: background 0.15s, color 0.15s;
+    }
+    .nav-link:hover { color: #e2e8f0; background: #2d3748; }
+    .nav-link.active { color: #e2e8f0; background: #2d3748; }
+    .nav-spacer { flex: 1; }
+    .nav-user {
+      font-size: 0.8rem;
+      color: #718096;
+      white-space: nowrap;
+    }
+    .nav-logout {
+      font-size: 0.8rem;
+      color: #a0aec0;
+      text-decoration: none;
+      padding: 0.25rem 0.6rem;
+      border-radius: 5px;
+      border: 1px solid #2d3748;
+    }
+    .nav-logout:hover { background: #2d3748; color: #e2e8f0; }
+
+    /* ── Scan status badge ── */
+    #scan-badge {
+      font-size: 0.75rem;
+      color: #68d391;
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+    #scan-badge.scanning { color: #f6ad55; }
+    #scan-badge .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      display: inline-block;
+    }
+    #scan-badge.scanning .dot {
+      animation: pulse-dot 1s ease-in-out infinite;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    /* ── Main content ── */
+    main {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 1.5rem 1.5rem;
+    }
+
+    /* ── Flash messages ── */
+    .flash {
+      padding: 0.7rem 1rem;
+      border-radius: 6px;
+      margin-bottom: 1rem;
+      font-size: 0.875rem;
+    }
+    .flash.error   { background: #742a2a; color: #fc8181; border: 1px solid #9b2c2c; }
+    .flash.success { background: #1c4532; color: #68d391; border: 1px solid #276749; }
+
+    /* ── Page header row ── */
+    .page-header {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 1.25rem;
+      flex-wrap: wrap;
+    }
+    .page-header h2 { font-size: 1.15rem; font-weight: 600; }
+
+    /* ── Filter form ── */
+    .filter-form {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 1rem;
+      padding: 0.75rem 1rem;
+      background: #161b27;
+      border: 1px solid #2d3748;
+      border-radius: 8px;
+    }
+    input[type="text"],
+    input[type="password"],
+    select {
+      background: #0f1117;
+      border: 1px solid #2d3748;
+      color: #e2e8f0;
+      padding: 0.45rem 0.7rem;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input[type="text"]:focus,
+    input[type="password"]:focus,
+    select:focus {
+      border-color: #63b3ed;
+    }
+    input[type="text"] { min-width: 260px; }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-block;
+      padding: 0.45rem 1rem;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      text-decoration: none;
+      transition: background 0.15s;
+    }
+    .btn-primary { background: #2b6cb0; color: #fff; }
+    .btn-primary:hover { background: #2c5282; }
+    .btn-secondary { background: #2d3748; color: #e2e8f0; }
+    .btn-secondary:hover { background: #4a5568; }
+    .btn-scan { background: #285e61; color: #81e6d9; margin-left: auto; }
+    .btn-scan:hover { background: #234e52; }
+    .btn-scan:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    /* ── Result count ── */
+    .result-count {
+      font-size: 0.8rem;
+      color: #718096;
+      margin-bottom: 0.75rem;
+    }
+
+    /* ── Table ── */
+    .table-wrap { overflow-x: auto; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    thead th {
+      background: #161b27;
+      color: #718096;
+      font-weight: 600;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 0.6rem 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid #2d3748;
+      position: sticky;
+      top: 52px;  /* below navbar */
+    }
+    tbody tr.data-row {
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    tbody tr.data-row:hover td { background: #161b27; }
+    tbody td {
+      padding: 0.6rem 0.75rem;
+      border-bottom: 1px solid #1a202c;
+      vertical-align: top;
+    }
+    tbody tr.detail-row { display: none; }
+    tbody tr.detail-row td {
+      background: #0d1117;
+      border-bottom: 1px solid #2d3748;
+      padding: 0.75rem 1rem 0.75rem 2.5rem;
+    }
+    .expand-arrow { color: #4a5568; font-size: 0.65rem; user-select: none; }
+
+    /* ── Badges ── */
+    .badge {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .badge-sigma  { background: #1a365d; color: #90cdf4; }
+    .badge-splunk { background: #322659; color: #d6bcfa; }
+    .badge-new      { background: #1c4532; color: #68d391; }
+    .badge-modified { background: #7b341e; color: #fbd38d; }
+
+    /* ── Detail content ── */
+    .detail-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #718096;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 0.6rem 0 0.3rem;
+    }
+    .detail-label:first-child { margin-top: 0; }
+    pre {
+      background: #0a0d14;
+      border: 1px solid #2d3748;
+      border-radius: 5px;
+      padding: 0.6rem 0.75rem;
+      font-size: 0.78rem;
+      color: #a0aec0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-x: auto;
+    }
+    .detail-text {
+      font-size: 0.83rem;
+      color: #718096;
+      line-height: 1.5;
+    }
+
+    /* ── Pagination ── */
+    .pagination {
+      display: flex;
+      gap: 0.4rem;
+      margin-top: 1.25rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .pagination .pg-info { font-size: 0.8rem; color: #718096; margin-right: 0.4rem; }
+    .pagination a,
+    .pagination span.pg-current {
+      display: inline-block;
+      padding: 0.3rem 0.65rem;
+      border-radius: 5px;
+      font-size: 0.82rem;
+      text-decoration: none;
+    }
+    .pagination a { color: #a0aec0; background: #161b27; border: 1px solid #2d3748; }
+    .pagination a:hover { background: #2d3748; color: #e2e8f0; }
+    .pagination span.pg-current { background: #2b6cb0; color: #fff; border: 1px solid #2b6cb0; }
+
+    /* ── Empty state ── */
+    .empty-state {
+      text-align: center;
+      padding: 4rem 1rem;
+      color: #4a5568;
+    }
+    .empty-state p { font-size: 0.9rem; }
+
+    /* ── Auth pages ── */
+    .auth-card {
+      max-width: 400px;
+      margin: 5rem auto;
+      background: #161b27;
+      border: 1px solid #2d3748;
+      border-radius: 10px;
+      padding: 2rem;
+    }
+    .auth-card h1 {
+      font-size: 1.25rem;
+      margin-bottom: 0.4rem;
+      color: #63b3ed;
+    }
+    .auth-card .subtitle {
+      font-size: 0.85rem;
+      color: #718096;
+      margin-bottom: 1.75rem;
+    }
+    .form-field { margin-bottom: 1.1rem; }
+    .form-field label {
+      display: block;
+      font-size: 0.8rem;
+      color: #a0aec0;
+      margin-bottom: 0.35rem;
+      font-weight: 500;
+    }
+    .form-field input { width: 100%; }
+    .btn-full { width: 100%; justify-content: center; padding: 0.6rem; }
+
+    /* ── Misc ── */
+    a { color: #63b3ed; }
+    a:hover { color: #90cdf4; }
+    .text-muted { color: #718096; }
+    .text-small { font-size: 0.8rem; }
+    .nowrap { white-space: nowrap; }
+    .trunc { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  </style>
+</head>
+<body>
+
+{% if current_user.is_authenticated %}
+<nav>
+  <a class="nav-brand" href="{{ url_for('index') }}">📡 RuleRadar</a>
+  <a class="nav-link {% if request.endpoint == 'detections' %}active{% endif %}"
+     href="{{ url_for('detections') }}">Detections</a>
+  <a class="nav-link {% if request.endpoint == 'updates' %}active{% endif %}"
+     href="{{ url_for('updates') }}">Updates</a>
+  <span class="nav-spacer"></span>
+  <span id="scan-badge"><span class="dot"></span><span id="scan-text">Loading…</span></span>
+  <span class="nav-user">{{ current_user.username }}</span>
+  <a class="nav-logout" href="{{ url_for('logout') }}">Log out</a>
+</nav>
+{% endif %}
+
+<main>
+  {% for category, message in get_flashed_messages(with_categories=True) %}
+    <div class="flash {{ category }}">{{ message }}</div>
+  {% endfor %}
+
+  {% block content %}{% endblock %}
+</main>
+
+{% if current_user.is_authenticated %}
+<script>
+// ── Scan status badge ──────────────────────────────────────────────────────────
+async function refreshScanBadge() {
+  try {
+    const res  = await fetch('/api/scan/status');
+    const data = await res.json();
+    const badge = document.getElementById('scan-badge');
+    const text  = document.getElementById('scan-text');
+    if (data.is_scanning) {
+      badge.className = 'scanning';
+      text.textContent = 'Scanning…';
+    } else {
+      badge.className = '';
+      if (data.last_scan) {
+        const d = new Date(data.last_scan);
+        text.textContent = 'Last scan: ' + d.toLocaleString();
+      } else {
+        text.textContent = 'No scan yet';
+      }
+    }
+  } catch (_) {}
+}
+
+// ── Trigger a scan on page open (non-blocking; honours 30-min throttle) ───────
+async function triggerPageScan() {
+  try { await fetch('/api/scan/trigger', { method: 'POST' }); } catch (_) {}
+}
+
+refreshScanBadge();
+triggerPageScan();
+setInterval(refreshScanBadge, 15000);
+</script>
+{% endif %}
+
+</body>
+</html>

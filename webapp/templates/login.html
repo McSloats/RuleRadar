@@ -1,0 +1,23 @@
+{% extends "layout.html" %}
+{% block title %}Log In — RuleRadar{% endblock %}
+
+{% block content %}
+<div class="auth-card">
+  <h1>📡 RuleRadar</h1>
+  <p class="subtitle">Sign in to continue</p>
+
+  <form method="post" autocomplete="on">
+    <div class="form-field">
+      <label for="username">Username</label>
+      <input type="text" id="username" name="username"
+             autocomplete="username" autofocus>
+    </div>
+    <div class="form-field">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password"
+             autocomplete="current-password">
+    </div>
+    <button type="submit" class="btn btn-primary btn-full">Log In</button>
+  </form>
+</div>
+{% endblock %}

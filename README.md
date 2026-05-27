@@ -1,17 +1,18 @@
 # RuleRadar
 
-Monitors [SigmaHQ/sigma](https://github.com/SigmaHQ/sigma) and [splunk/security_content](https://github.com/splunk/security_content) for new and modified detection rules, then delivers a daily Markdown report to Discord, uploads it to a GitHub repository, and exposes a web interface for browsing and searching all reports.
+Monitors [SigmaHQ/sigma](https://github.com/SigmaHQ/sigma) and [splunk/security_content](https://github.com/splunk/security_content) for new and modified detection rules. All data is stored locally in a SQLite database and browsable through a built-in web interface.
 
 ## What it does
 
-Every 24 hours RuleRadar:
-1. Fetches commits from both repos and filters for new/modified rule files (`.yml`/`.yaml`)
+Every hour (and on page open) RuleRadar:
+1. Fetches commits from both repos and filters for new/modified rule files (`.yml` / `.yaml`)
 2. Converts Sigma rules to Splunk SPL via `pySigma-backend-splunk`
-3. Builds a Markdown report summarising all changes and releases
-4. Posts the report to a Discord channel as a file attachment
-5. Uploads the report to a GitHub repository under `reports/`
+3. Persists every detection and change event to a local SQLite database
+4. Optionally posts a brief summary to a Discord channel
 
-The web interface lets you browse all uploaded reports, filter by date range, full-text search across every report, and auto-refreshes every 5 minutes to surface new reports without a page reload.
+The web interface provides:
+- **Detections** — full-text search across every known rule (title, description, detection logic, SPL)
+- **Updates** — chronological feed of new and modified rules, filterable by source and change type
 
 ## Configuration
 
@@ -19,13 +20,8 @@ Fill in `config.json` before running:
 
 | Key | Description |
 |-----|-------------|
-| `github_token` | Personal access token — needs **Contents: Read and write** on the reports repo |
-| `discord_webhook_url` | Discord webhook URL for the target channel |
-| `github_reports_owner` | GitHub username / org that owns the reports repo |
-| `github_reports_repo` | Name of the repo where reports will be uploaded |
-| `github_reports_branch` | Branch to commit reports to (default: `main`) |
-
----
+| `github_token` | Personal access token — needs **Contents: Read** on the monitored repos. Unauthenticated requests are rate-limited to 60/hour; a token raises this to 5,000/hour. |
+| `discord_webhook_url` | *(Optional)* Discord webhook URL for change notifications. Leave as-is to disable. |
 
 ## Running manually
 
@@ -33,7 +29,7 @@ Fill in `config.json` before running:
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
@@ -43,23 +39,24 @@ pip install -r requirements.txt
 python3 start.py
 ```
 
-This starts the **web interface** and **scheduler** together. Open http://localhost:5000.
+Starts the **web interface** and **hourly scheduler** together.  
+Open **http://localhost:5000** — you will be prompted to create an admin account on first visit.
 
-### Optional: run the monitor immediately on startup
+### Optional: run a scan immediately on startup
 
 ```bash
 python3 start.py --run-now
 ```
 
-Runs `ruleradar.py` once right away (generating a report and sending to Discord), then starts the scheduler for future daily runs.
+Runs one scan right away before starting the scheduler.
 
 ### Run components individually
 
 | Command | What it does |
 |---------|-------------|
-| `python3 ruleradar.py` | Run one monitor cycle immediately |
+| `python3 ruleradar.py` | Run one scan cycle immediately |
 | `python3 webapp/app.py` | Web interface only (port 5000) |
-| `python3 scheduler.py` | Scheduler only (fires `ruleradar.py` daily at 08:00 ET) |
+| `python3 scheduler.py` | Hourly scheduler only |
 
 ---
 
@@ -71,12 +68,19 @@ Runs `ruleradar.py` once right away (generating a report and sending to Discord)
 docker compose up --build -d
 ```
 
-Open **http://localhost:5000**. The scheduler runs automatically inside the container.
+Open **http://localhost:5000** and create your admin account.  
+The database is stored in a named Docker volume (`ruleradar-db`) so data persists across restarts.
 
 ### Stop
 
 ```bash
 docker compose down
+```
+
+### Remove all data (including the database volume)
+
+```bash
+docker compose down -v
 ```
 
 ---
@@ -85,8 +89,14 @@ docker compose down
 
 | Service | Description |
 |---------|-------------|
-| `web` | Flask web interface — browse, filter, and search reports |
-| `scheduler` | Runs `ruleradar.py` daily at 08:00 ET via APScheduler |
+| `web` | Flask web interface — login, browse detections, view updates |
+| `scheduler` | Runs a scan every hour via APScheduler |
+
+---
+
+## First run
+
+On the very first scan RuleRadar uses a **30-day window** to seed the database with recent history from both repos. All subsequent scans use a **2-hour window**.
 
 ---
 
@@ -96,4 +106,13 @@ docker compose down
 bash cleanup.sh
 ```
 
-Removes any cron job, virtual environment, log file, and optionally the project directory.
+Removes the virtual environment, log file, and optionally the project directory.
+
+---
+
+## Required GitHub token scopes
+
+The token only needs **read access** to public repositories:
+
+- `public_repo` (classic token), **or**
+- `Contents: Read` (fine-grained token scoped to the target repos)

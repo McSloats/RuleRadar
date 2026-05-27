@@ -1,185 +1,265 @@
 #!/usr/bin/env python3
 """
-RuleRadar web interface — serves the report viewer UI and provides
-JSON API endpoints for listing, fetching, and searching reports
-stored in the configured GitHub repository.
+RuleRadar web interface.
+
+Two main pages:
+  /detections  — searchable, paginated table of every known detection rule
+  /updates     — feed of new/modified rule events (change log)
+
+Auth: Flask-Login with bcrypt-hashed passwords.
+      First visit redirects to /setup to create the initial admin account.
+      The setup page is disabled permanently once any user exists.
+
+Scan triggering:
+  - Automatically on page load (if last scan was >30 min ago)
+  - Manually via the "Scan Now" button (POST /api/scan/trigger)
+  - Independently by the hourly scheduler process
+  All three paths share the threading.Lock inside ruleradar.run_scan(),
+  so concurrent calls are harmless.
 """
 
 from __future__ import annotations
 
-import base64
 import json
-import urllib.error
-import urllib.request
+import secrets
+import sys
+import threading
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from threading import Lock
 
-from flask import Flask, jsonify, render_template, request
+# Allow importing database and ruleradar from the project root
+ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT))
+
+import bcrypt
+import database as db
+import ruleradar
+
+from flask import (
+    Flask, flash, jsonify, redirect, render_template,
+    request, url_for,
+)
+from flask_login import (
+    LoginManager, UserMixin, current_user,
+    login_required, login_user, logout_user,
+)
+
+# ── App setup ──────────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
 
-CONFIG_PATH = Path(__file__).parent.parent / "config.json"
 
-# ── In-memory report content cache (content never changes once written) ────────
-_content_cache: dict[str, str] = {}
-_cache_lock = Lock()
-
-
-# ── Config ─────────────────────────────────────────────────────────────────────
-
-def load_config() -> dict:
-    with open(CONFIG_PATH) as f:
-        return json.load(f)
-
-
-# ── GitHub helpers ─────────────────────────────────────────────────────────────
-
-def gh_get(url: str, token: str) -> "dict | list | None":
-    req = urllib.request.Request(url)
-    if token:
-        req.add_header("Authorization", f"Bearer {token}")
-    req.add_header("Accept", "application/vnd.github.v3+json")
-    req.add_header("User-Agent", "ruleradar/1.0")
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        app.logger.error("GitHub %s: %s", e.code, url)
-        return None
-    except Exception as e:
-        app.logger.error("GitHub fetch error: %s", e)
-        return None
+def _load_secret_key() -> str:
+    """
+    Load or generate a persistent secret key used to sign session cookies.
+    Stored alongside the database so it survives container restarts when the
+    DB volume is mounted (Docker).  Falls back to the project root locally.
+    """
+    key_path = db.DB_PATH.parent / ".secret_key"
+    if key_path.exists():
+        return key_path.read_text().strip()
+    key_path.parent.mkdir(parents=True, exist_ok=True)
+    key = secrets.token_hex(32)
+    key_path.write_text(key)
+    return key
 
 
-def list_reports_from_github(cfg: dict) -> list[dict]:
-    """Return a sorted list of report metadata from the reports/ directory."""
-    owner  = cfg["github_reports_owner"]
-    repo   = cfg["github_reports_repo"]
-    branch = cfg.get("github_reports_branch", "main")
-    token  = cfg.get("github_token", "")
+app.secret_key = _load_secret_key()
 
-    url  = f"https://api.github.com/repos/{owner}/{repo}/contents/reports?ref={branch}"
-    data = gh_get(url, token) or []
+login_manager = LoginManager(app)
+login_manager.login_view = "login"          # type: ignore[assignment]
+login_manager.login_message = "Please log in to access RuleRadar."
+login_manager.login_message_category = "error"
 
-    reports = []
-    for f in data:
-        name = f.get("name", "")
-        if not name.endswith(".md"):
-            continue
-        # Filenames are YYYY-MM-DD_HH-MM.md
-        reports.append({
-            "name": name,
-            "date": name[:10],
-            "time": name[11:16].replace("-", ":") if len(name) > 15 else "",
-            "size": f.get("size", 0),
-        })
-
-    return sorted(reports, key=lambda x: x["name"], reverse=True)
+# Ensure DB tables exist whenever the webapp starts
+db.init_db()
 
 
-def fetch_report_content(cfg: dict, filename: str) -> "str | None":
-    """Fetch a single report's markdown content, using the cache."""
-    with _cache_lock:
-        if filename in _content_cache:
-            return _content_cache[filename]
+# ── User model for Flask-Login ─────────────────────────────────────────────────
 
-    owner  = cfg["github_reports_owner"]
-    repo   = cfg["github_reports_repo"]
-    branch = cfg.get("github_reports_branch", "main")
-    token  = cfg.get("github_token", "")
-
-    url  = f"https://api.github.com/repos/{owner}/{repo}/contents/reports/{filename}?ref={branch}"
-    data = gh_get(url, token)
-
-    content = None
-    if data and "content" in data:
-        content = base64.b64decode(data["content"]).decode("utf-8", errors="replace")
-
-    if content:
-        with _cache_lock:
-            _content_cache[filename] = content
-
-    return content
+class User(UserMixin):
+    def __init__(self, row):
+        self.id       = row["id"]
+        self.username = row["username"]
 
 
-# ── Routes ─────────────────────────────────────────────────────────────────────
+@login_manager.user_loader
+def load_user(user_id: str):
+    row = db.get_user_by_id(int(user_id))
+    return User(row) if row else None
+
+
+# ── Background scan helper ─────────────────────────────────────────────────────
+
+_STALE_MINUTES = 30   # trigger a background scan if last scan is older than this
+
+
+def _maybe_trigger_scan():
+    """
+    Start a background scan if:
+      - no scan is currently running, AND
+      - the last scan finished more than _STALE_MINUTES ago (or never ran)
+
+    Returns immediately; the scan runs in a daemon thread.
+    """
+    status = db.get_scan_status()
+    if status.get("is_scanning"):
+        return
+
+    last = status.get("last_scan")
+    if last:
+        last_dt     = datetime.fromisoformat(last.replace("Z", "+00:00"))
+        age_minutes = (datetime.now(timezone.utc) - last_dt).total_seconds() / 60
+        if age_minutes < _STALE_MINUTES:
+            return
+
+    def _run():
+        try:
+            cfg_path = ROOT / "config.json"
+            with open(cfg_path) as fh:
+                cfg = json.load(fh)
+            ruleradar.run_scan(cfg)
+        except Exception as e:
+            print(f"  Background scan error: {e}", flush=True)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+# ── Auth routes ────────────────────────────────────────────────────────────────
+
+@app.route("/setup", methods=["GET", "POST"])
+def setup():
+    """
+    First-run setup — create the initial admin account.
+    Redirects to /login once any user exists.
+    """
+    if db.user_count() > 0:
+        return redirect(url_for("login"))
+
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        confirm  = request.form.get("confirm",  "")
+
+        if not username or not password:
+            flash("Username and password are required.", "error")
+        elif password != confirm:
+            flash("Passwords do not match.", "error")
+        elif len(password) < 8:
+            flash("Password must be at least 8 characters.", "error")
+        else:
+            pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+            db.create_user(username, pw_hash)
+            flash("Account created — please log in.", "success")
+            return redirect(url_for("login"))
+
+    return render_template("setup.html")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if db.user_count() == 0:
+        return redirect(url_for("setup"))
+    if current_user.is_authenticated:
+        return redirect(url_for("detections"))
+
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        row      = db.get_user_by_username(username)
+        if row and bcrypt.checkpw(password.encode(), row["password_hash"].encode()):
+            login_user(User(row), remember=True)
+            next_page = request.args.get("next")
+            return redirect(next_page or url_for("detections"))
+        flash("Invalid username or password.", "error")
+
+    return render_template("login.html")
+
+
+@app.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for("login"))
+
+
+# ── Main page routes ───────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    if db.user_count() == 0:
+        return redirect(url_for("setup"))
+    if not current_user.is_authenticated:
+        return redirect(url_for("login"))
+    return redirect(url_for("detections"))
+
+
+@app.route("/detections")
+@login_required
+def detections():
+    _maybe_trigger_scan()
+
+    q        = request.args.get("q", "").strip()
+    source   = request.args.get("source", "")
+    page     = max(1, int(request.args.get("page", 1) or 1))
+    per_page = 50
+
+    rows, total = db.search_detections(query=q, source=source, page=page, per_page=per_page)
+    total_pages = max(1, (total + per_page - 1) // per_page)
+
+    return render_template(
+        "detections.html",
+        rows=rows, total=total,
+        page=page, total_pages=total_pages,
+        q=q, source=source,
+    )
+
+
+@app.route("/updates")
+@login_required
+def updates():
+    _maybe_trigger_scan()
+
+    source      = request.args.get("source", "")
+    change_type = request.args.get("change_type", "")
+    page        = max(1, int(request.args.get("page", 1) or 1))
+    per_page    = 50
+    offset      = (page - 1) * per_page
+
+    rows, total = db.get_updates(
+        source=source, change_type=change_type,
+        limit=per_page, offset=offset,
+    )
+    total_pages = max(1, (total + per_page - 1) // per_page)
+
+    return render_template(
+        "updates.html",
+        rows=rows, total=total,
+        page=page, total_pages=total_pages,
+        source=source, change_type=change_type,
+    )
+
+
+# ── API routes ─────────────────────────────────────────────────────────────────
+
+@app.route("/api/scan/trigger", methods=["POST"])
+@login_required
+def api_scan_trigger():
+    """Kick off a background scan (honours the 30-minute throttle)."""
+    _maybe_trigger_scan()
+    return jsonify({"queued": True})
+
+
+@app.route("/api/scan/status")
+@login_required
+def api_scan_status():
+    """Return the current scan status row as JSON."""
+    return jsonify(db.get_scan_status())
 
 
 @app.route("/health")
 def health():
     return jsonify({"status": "ok"})
-
-
-@app.route("/api/reports")
-def api_list_reports():
-    """Return metadata for all available reports."""
-    try:
-        cfg     = load_config()
-        reports = list_reports_from_github(cfg)
-        return jsonify(reports)
-    except Exception as e:
-        app.logger.exception("Failed to list reports")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/report/<path:filename>")
-def api_get_report(filename: str):
-    """Return the raw markdown content of a single report."""
-    try:
-        cfg     = load_config()
-        content = fetch_report_content(cfg, filename)
-        if content:
-            return jsonify({"content": content})
-        return jsonify({"error": "Report not found"}), 404
-    except Exception as e:
-        app.logger.exception("Failed to fetch report: %s", filename)
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/search")
-def api_search():
-    """
-    Filter reports by date range and/or text content.
-
-    Query params:
-      q     — case-insensitive text to search within report content
-      from  — start date (YYYY-MM-DD, inclusive)
-      to    — end date   (YYYY-MM-DD, inclusive)
-    """
-    query     = request.args.get("q", "").strip().lower()
-    from_date = request.args.get("from", "")
-    to_date   = request.args.get("to", "")
-
-    try:
-        cfg         = load_config()
-        all_reports = list_reports_from_github(cfg)
-
-        # Date range filter (cheap — no extra API calls needed)
-        date_filtered = [
-            r for r in all_reports
-            if (not from_date or r["date"] >= from_date)
-            and (not to_date   or r["date"] <= to_date)
-        ]
-
-        if not query:
-            return jsonify(date_filtered)
-
-        # Text search — fetch content for each date-filtered report
-        results = []
-        for r in date_filtered:
-            content = fetch_report_content(cfg, r["name"])
-            if content and query in content.lower():
-                results.append({**r, "matches": content.lower().count(query)})
-
-        return jsonify(results)
-
-    except Exception as e:
-        app.logger.exception("Search failed")
-        return jsonify({"error": str(e)}), 500
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
