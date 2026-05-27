@@ -1,6 +1,10 @@
-# Required
+# Core monitor
 pyyaml
+pySigma-backend-splunk
 
-# Optional — enables automatic Sigma → Splunk SPL conversion
-# Uncomment if you want auto-conversion in Discord reports:
-# pySigma-backend-splunk
+# Web interface
+flask
+
+# Scheduler (Docker container replacement for cron)
+APScheduler>=3.10,<4.0
+pytz

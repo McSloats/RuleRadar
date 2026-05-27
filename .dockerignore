@@ -1,0 +1,17 @@
+# Git history
+.git/
+.gitignore
+
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Runtime files
+monitor_log.txt
+
+# Secrets — config.json is mounted at runtime, never baked in
+config.json
