@@ -11,6 +11,7 @@ services:
       - ruleradar-db:/app/data
     environment:
       - RULERADAR_DB=/app/data/ruleradar.db
+      - PYTHONUNBUFFERED=1
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:5000/health || exit 1"]
@@ -28,6 +29,7 @@ services:
       - ruleradar-db:/app/data
     environment:
       - RULERADAR_DB=/app/data/ruleradar.db
+      - PYTHONUNBUFFERED=1
     restart: unless-stopped
     depends_on:
       web:

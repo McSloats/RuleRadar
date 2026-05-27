@@ -310,6 +310,9 @@
     .badge-renamed  { background: #251840; color: #c4b5fd; }
     .badge-warning  { background: #4a3000; color: #fcd34d; }
     .badge-admin    { background: #5c3d00; color: #fcd34d; }
+    /* Activity-log category badges */
+    .badge-auth     { background: #1a1040; color: #c4b5fd; }
+    .badge-system   { background: #2b1e4a; color: #9080b8; }
     .badge-user     { background: #2b1e4a; color: #9080b8; }
     /* MITRE technique badges — clickable */
     .badge-mitre {
@@ -393,6 +396,13 @@
       overflow-x: auto;
     }
     .detail-text { font-size: 0.83rem; color: #6a5888; line-height: 1.5; }
+    /* Expanded detail body inside activity-log <details> */
+    .detail-expand-body {
+      margin-top: 0.3rem; padding: 0.4rem 0.6rem;
+      background: #0a0716; border-radius: 4px;
+      font-family: monospace; font-size: 0.75rem; color: #9080b8;
+      max-width: 500px; word-break: break-all;
+    }
     /* References list */
     .detail-refs {
       margin: 0.2rem 0 0.4rem 1rem;

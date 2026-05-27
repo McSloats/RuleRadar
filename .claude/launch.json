@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "logo-preview",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "7788", "--directory", "logo_concepts"],
+      "port": 7788
+    }
+  ]
+}

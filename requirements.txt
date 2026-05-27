@@ -1,11 +1,11 @@
 # Core monitor
-pyyaml
-pySigma-backend-splunk
+pyyaml>=6.0,<7.0
+pySigma-backend-splunk>=0.9,<2.0
 
 # Web interface + auth
-flask
-flask-login
-bcrypt
+flask>=3.0,<4.0
+flask-login>=0.6,<1.0
+bcrypt>=4.0,<5.0
 
 # Scheduler (replaces OS cron inside Docker / locally)
 APScheduler>=3.10,<4.0

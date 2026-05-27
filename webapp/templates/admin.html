@@ -229,7 +229,7 @@
               {% endif %}
 
               <details class="inline-action">
-                <summary>Reset password</summary>
+                <summary class="btn btn-secondary btn-sm" style="cursor:pointer;">Reset password</summary>
                 <div class="detail-body">
                   <form method="post"
                         action="{{ url_for('admin_reset_password', user_id=user.id) }}">

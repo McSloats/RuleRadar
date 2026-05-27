@@ -552,14 +552,12 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int]:
 
     new_count, mod_count = 0, 0
 
+    def _in_scope(fp: str) -> bool:
+        """Return True if fp is a YAML file inside one of the monitored paths."""
+        return fp.endswith((".yml", ".yaml")) and any(fp.startswith(p) for p in paths)
+
     if diff_ok and changed_files:
         for status_char, old_fp, new_fp in changed_files:
-            # Skip files outside our monitored paths or non-YAML
-            def _in_scope(fp: str) -> bool:
-                return (
-                    fp.endswith((".yml", ".yaml"))
-                    and any(fp.startswith(p) for p in paths)
-                )
 
             if status_char == "D":
                 if _in_scope(old_fp):

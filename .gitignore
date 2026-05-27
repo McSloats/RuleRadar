@@ -1,0 +1,22 @@
+# Python
+.venv/
+.env
+*.pyc
+__pycache__/
+
+# Database & secrets (never commit these)
+*.db
+.secret_key
+
+# Local config (obsolete — settings live in the web UI)
+config.json
+
+# Logs
+monitor_log.txt
+
+# Design assets (not needed in production)
+logo_concepts/
+
+# OS
+.DS_Store
+Thumbs.db

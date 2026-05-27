@@ -172,8 +172,6 @@ def _migrate_schema(conn: sqlite3.Connection):
         "ALTER TABLE detections ADD COLUMN severity         TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE detections ADD COLUMN rule_date        TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE detections ADD COLUMN refs             TEXT NOT NULL DEFAULT ''",
-        # v4: catalog scan tracking (column kept for upgrade compatibility, no longer written)
-        "ALTER TABLE scan_status ADD COLUMN catalog_done INTEGER NOT NULL DEFAULT 0",
     ]
     for sql in migrations:
         try:

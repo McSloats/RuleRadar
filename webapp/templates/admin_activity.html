@@ -62,18 +62,18 @@
         </td>
         <td>
           <span class="badge
-            {% if row.category == 'auth'   %}badge-sigma
+            {% if row.category == 'auth'   %}badge-auth
             {% elif row.category == 'scan' %}badge-new
             {% elif row.category == 'admin'%}badge-admin
-            {% elif row.category == 'user' %}badge-splunk
-            {% else %}badge-user
+            {% elif row.category == 'user' %}badge-user
+            {% else %}badge-system
             {% endif %}">
             {{ row.category }}
           </span>
         </td>
         <td>
           <span class="badge
-            {% if row.level == 'error'   %}badge-modified
+            {% if row.level == 'error'   %}badge-deleted
             {% elif row.level == 'warning' %}badge-warning
             {% else %}badge-user
             {% endif %}">
@@ -89,12 +89,7 @@
                 <summary style="cursor:pointer; color:#d4a017; font-size:0.78rem; list-style:none;">
                   {{ row.detail[:60] }}…
                 </summary>
-                <div style="margin-top:0.3rem; padding:0.4rem 0.6rem;
-                            background:#0a0716; border-radius:4px;
-                            font-family:monospace; font-size:0.75rem; color:#9080b8;
-                            max-width:500px; word-break:break-all;">
-                  {{ row.detail }}
-                </div>
+                <div class="detail-expand-body">{{ row.detail }}</div>
               </details>
             {% else %}
               {{ row.detail }}
