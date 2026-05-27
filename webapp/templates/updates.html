@@ -83,19 +83,63 @@
       {# ── Expandable detail row ── #}
       <tr class="detail-row">
         <td colspan="6">
-          {% if row.detection_logic %}
-            <p class="detail-label">Detection Logic</p>
-            <pre>{{ row.detection_logic }}</pre>
+
+          {# ── Author / Status / Date strip ── #}
+          {% if row.author or row.rule_status or row.rule_date %}
+          <div class="detail-meta">
+            {% if row.author %}
+              <span><span class="detail-label">Author</span>{{ row.author }}</span>
+            {% endif %}
+            {% if row.rule_status %}
+              <span><span class="detail-label">Status</span>{{ row.rule_status }}</span>
+            {% endif %}
+            {% if row.rule_date %}
+              <span><span class="detail-label">Date</span>{{ row.rule_date }}</span>
+            {% endif %}
+          </div>
           {% endif %}
 
-          {% if row.spl %}
-            <p class="detail-label">Splunk SPL</p>
-            <pre>{{ row.spl }}</pre>
+          {# ── Description ── #}
+          {% if row.description %}
+            <p class="detail-text" style="margin-bottom:0.6rem; color:#9080b8;">{{ row.description }}</p>
           {% endif %}
 
-          {% if not row.detection_logic and not row.spl %}
+          {# ── Detection logic ── #}
+          {% if row.source == 'splunk' %}
+            {# For Splunk content the SPL field IS the detection logic #}
+            {% if row.spl %}
+              <p class="detail-label">Detection Logic (SPL)</p>
+              <pre>{{ row.spl }}</pre>
+            {% endif %}
+          {% else %}
+            {# Sigma / other: native detection block first, then optional SPL translation #}
+            {% if row.detection_logic %}
+              <p class="detail-label">Detection Logic</p>
+              <pre>{{ row.detection_logic }}</pre>
+            {% endif %}
+            {% if row.spl %}
+              <p class="detail-label">Splunk SPL</p>
+              <pre>{{ row.spl }}</pre>
+            {% endif %}
+          {% endif %}
+
+          {# ── References ── #}
+          {% if row.refs %}
+            <p class="detail-label">References</p>
+            <ul class="detail-refs">
+              {% for ref in row.refs.split('\n') if ref.strip() %}
+                <li><a href="{{ ref.strip() }}" target="_blank" rel="noopener">{{ ref.strip() }}</a></li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+
+          {# ── Fallback when truly nothing is available ── #}
+          {% if not row.author and not row.rule_status and not row.rule_date
+                and not row.description and not row.detection_logic
+                and not row.spl and not row.refs %}
             <p class="detail-text text-muted">No additional details available.</p>
           {% endif %}
+
         </td>
       </tr>
       {% endfor %}

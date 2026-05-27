@@ -2,10 +2,9 @@
 """
 RuleRadar — security detection monitor using local git clones.
 
-Repositories are cloned with git (no rate limits) and kept up to date
-via git fetch + diff.  The GitHub REST API is used only for releases
-metadata (2 calls per scan, well within the unauthenticated 60/hr limit)
-and optional token validation in the admin panel.
+Repositories are cloned with git (no rate limits, no authentication needed)
+and kept up to date via git fetch + diff.  The GitHub REST API is used only
+for releases metadata (2 unauthenticated calls per scan).
 
 Scanning flow
 -------------
@@ -17,8 +16,8 @@ Scanning flow
     sync_repo()   → git fetch, diff old SHA vs FETCH_HEAD, process changed files
 
 Call run_scan() directly to trigger a scan from any other module.
-GitHub token and Discord webhooks are read from the database (configured
-via the web admin panel); no config.json is needed.
+Discord webhooks are read from the database (configured via the web admin
+panel); no config.json is needed.
 """
 
 from __future__ import annotations
@@ -112,21 +111,11 @@ MITRE_TACTICS: dict[str, str] = {
 _TECHNIQUE_RE = re.compile(r"^t\d{4}(\.\d{3})?$")
 
 
-# ── GitHub REST API helpers (used only for releases + token validation) ────────
+# ── GitHub REST API helpers (used only for releases metadata) ──────────────────
 
-def _is_real_token(token: str) -> bool:
-    """Return True only if the token looks like an actual GitHub token."""
-    if not token:
-        return False
-    known_prefixes = ("ghp_", "github_pat_", "ghs_", "gho_", "v1.")
-    return any(token.startswith(p) for p in known_prefixes)
-
-
-def _gh(url: str, token: str = "") -> dict | list | None:
-    """Minimal GitHub REST helper — used only for releases and token validation."""
+def _gh(url: str) -> dict | list | None:
+    """Minimal unauthenticated GitHub REST helper — used only for releases."""
     req = urllib.request.Request(url)
-    if _is_real_token(token):
-        req.add_header("Authorization", f"Bearer {token}")
     req.add_header("Accept", "application/vnd.github.v3+json")
     req.add_header("User-Agent", "ruleradar/1.0")
     try:
@@ -140,58 +129,13 @@ def _gh(url: str, token: str = "") -> dict | list | None:
         return None
 
 
-def releases_since(owner: str, repo: str, since_dt: datetime, token: str = ""):
-    """Fetch recent GitHub releases newer than since_dt (uses the REST API)."""
+def releases_since(owner: str, repo: str, since_dt: datetime):
+    """Fetch recent GitHub releases newer than since_dt (unauthenticated REST call)."""
     data = _gh(
-        f"https://api.github.com/repos/{owner}/{repo}/releases?per_page=10", token
+        f"https://api.github.com/repos/{owner}/{repo}/releases?per_page=10"
     ) or []
     cutoff = since_dt.isoformat().replace("+00:00", "Z")
     return [r for r in data if (r.get("published_at") or "") >= cutoff]
-
-
-def validate_token(token: str) -> dict:
-    """
-    Verify a GitHub personal access token via the rate_limit endpoint.
-
-    Returns:
-        {"valid": True,  "limit": 5000, "remaining": 4995}
-        {"valid": False, "limit": 0,    "error": "...reason..."}
-
-    The GitHub token is now optional — repos are cloned without one.
-    This endpoint is used only in the admin panel as a convenience check.
-    """
-    if not _is_real_token(token):
-        return {
-            "valid": False, "limit": 0,
-            "error": "Token format not recognised — must start with ghp_, github_pat_, etc.",
-        }
-    try:
-        req = urllib.request.Request("https://api.github.com/rate_limit")
-        req.add_header("Authorization", f"Bearer {token}")
-        req.add_header("User-Agent", "ruleradar/1.0")
-        with urllib.request.urlopen(req, timeout=10) as r:
-            data = json.loads(r.read())
-        rate      = data.get("rate", {})
-        limit     = rate.get("limit", 0)
-        remaining = rate.get("remaining", 0)
-        if limit >= 5000:
-            return {"valid": True, "limit": limit, "remaining": remaining}
-        return {
-            "valid": False, "limit": limit, "remaining": remaining,
-            "error": f"Token accepted but rate limit is only {limit}/hr (expected 5,000+). "
-                     "Check that the token has public_repo scope.",
-        }
-    except urllib.error.HTTPError as e:
-        if e.code == 401:
-            return {
-                "valid": False, "limit": 0,
-                "error": "GitHub rejected the token (401 Unauthorized). "
-                         "Check that the token hasn't expired or been revoked.",
-            }
-        return {"valid": False, "limit": 0,
-                "error": f"GitHub API returned HTTP {e.code}."}
-    except Exception as e:
-        return {"valid": False, "limit": 0, "error": str(e)}
 
 
 # ── YAML / content helpers ─────────────────────────────────────────────────────
@@ -723,8 +667,8 @@ def run_scan(triggered_by: str = "scheduler") -> dict:
       - status='ready'/'error' → git fetch + diff (incremental sync)
       - status='cloning'/'indexing' → skip (already in progress)
 
-    The GitHub REST API is called only for releases metadata (2 requests/scan,
-    fine even without a token).
+    The GitHub REST API is called only for releases metadata (2 unauthenticated
+    requests/scan).
 
     Thread-safe: returns {"skipped": True} if a scan is already running.
     triggered_by : free-text label for the activity log.
@@ -798,13 +742,12 @@ def run_scan(triggered_by: str = "scheduler") -> dict:
                                 actor=triggered_by, detail=msg, level="error")
                 repo_summary.append(f"{name}: ERROR — {msg[:80]}")
 
-        # Fetch GitHub releases for each active repo (low-rate REST call)
-        token     = db.get_app_config("github_token")
-        since_dt  = datetime.now(timezone.utc) - timedelta(hours=2)
+        # Fetch GitHub releases for each active repo (unauthenticated REST call)
+        since_dt = datetime.now(timezone.utc) - timedelta(hours=2)
         for repo_cfg in repos:
             try:
                 for rel in releases_since(
-                    repo_cfg["owner"], repo_cfg["repo"], since_dt, token
+                    repo_cfg["owner"], repo_cfg["repo"], since_dt
                 ):
                     db.upsert_release(
                         repo_cfg["name"],

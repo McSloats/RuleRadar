@@ -138,31 +138,31 @@
         </div>
         <div class="form-row" style="margin-bottom:0.75rem;">
           <div style="flex:1; min-width:160px;">
-            <label style="display:block; font-size:0.8rem; color:#a0aec0; margin-bottom:0.3rem;">Display Name</label>
+            <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">Display Name</label>
             <input type="text" name="display_name" class="wide" placeholder="My Custom Rules">
           </div>
           <div style="flex:1; min-width:120px;">
-            <label style="display:block; font-size:0.8rem; color:#a0aec0; margin-bottom:0.3rem;">GitHub Owner</label>
+            <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">GitHub Owner</label>
             <input type="text" name="owner" class="wide" placeholder="owner" required>
           </div>
           <div style="flex:1; min-width:120px;">
-            <label style="display:block; font-size:0.8rem; color:#a0aec0; margin-bottom:0.3rem;">Repo Name</label>
+            <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">Repo Name</label>
             <input type="text" name="repo" class="wide" placeholder="repo-name" required>
           </div>
         </div>
         <div class="form-row" style="margin-bottom:0.75rem;">
           <div style="flex:1; min-width:100px;">
-            <label style="display:block; font-size:0.8rem; color:#a0aec0; margin-bottom:0.3rem;">Branch</label>
+            <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">Branch</label>
             <input type="text" name="branch" class="wide" placeholder="main" value="main">
           </div>
           <div style="flex:2; min-width:180px;">
-            <label style="display:block; font-size:0.8rem; color:#a0aec0; margin-bottom:0.3rem;">
+            <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">
               Paths <span class="text-muted">(comma-separated, e.g. rules/, detections/)</span>
             </label>
             <input type="text" name="paths" class="wide" placeholder="rules/, detections/">
           </div>
           <div style="flex:1; min-width:100px;">
-            <label style="display:block; font-size:0.8rem; color:#a0aec0; margin-bottom:0.3rem;">Parser</label>
+            <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">Parser</label>
             <select name="parser" class="wide">
               <option value="sigma">Sigma</option>
               <option value="splunk">Splunk</option>
@@ -173,37 +173,6 @@
       </form>
     </div>
   </details>
-</div>
-
-{# ═══ GitHub Configuration ═════════════════════════════════════════════════════ #}
-<div class="card">
-  <div class="card-title">⚙️ GitHub Configuration</div>
-  <p class="text-muted text-small" style="margin-bottom:1rem;">
-    A GitHub token is <strong>optional</strong> — repositories are cloned directly via git
-    and do not require API access.  A token is only used to fetch
-    <strong>releases metadata</strong> (2 API calls per scan), which works fine at the
-    unauthenticated limit of 60 req/hr.  Add a token here only if you are hitting that
-    limit for releases, or want faster size estimates on the setup page.
-  </p>
-  <form method="post" action="{{ url_for('admin_config') }}" style="max-width:560px;">
-    <div class="form-group">
-      <label>GitHub Token <span class="text-muted">(optional)</span></label>
-      <div style="display:flex; gap:0.5rem; align-items:center;">
-        <input type="password" id="gh-token-input" name="github_token"
-               class="wide" value="{{ github_token }}"
-               placeholder="ghp_… or github_pat_… (leave blank for unauthenticated)"
-               autocomplete="off">
-        <button type="button" class="btn btn-secondary btn-sm"
-                onclick="toggleTokenVisibility()">Show</button>
-      </div>
-      {% if token_display %}
-      <p class="hint text-success">✓ Token set: {{ token_display }}</p>
-      {% else %}
-      <p class="hint text-muted">No token — using unauthenticated API for releases (60 req/hr)</p>
-      {% endif %}
-    </div>
-    <button type="submit" class="btn btn-primary">Save Token</button>
-  </form>
 </div>
 
 {# ═══ User Management ══════════════════════════════════════════════════════════ #}
@@ -326,25 +295,11 @@
   </form>
 </div>
 
-<script>
-function toggleTokenVisibility() {
-  const input = document.getElementById('gh-token-input');
-  const btn   = event.target;
-  if (input.type === 'password') {
-    input.type = 'text';
-    btn.textContent = 'Hide';
-  } else {
-    input.type = 'password';
-    btn.textContent = 'Show';
-  }
-}
-</script>
-
 <style>
 /* ── Repo status badges ─────────────────────────────────────────────────── */
 .badge-repo-pending   { background: #2b1e4a; color: #c4b5fd; }
-.badge-repo-cloning   { background: #1a3366; color: #90cdf4; }
-.badge-repo-indexing  { background: #1a3366; color: #90cdf4; }
+.badge-repo-cloning   { background: #251840; color: #c4b5fd; }
+.badge-repo-indexing  { background: #251840; color: #c4b5fd; }
 .badge-repo-ready     { background: #14301f; color: #6ee7b7; border: 1px solid #1a5c38; }
 .badge-repo-error     { background: #3b1818; color: #fc8181; border: 1px solid #7c1d1d; }
 .badge-repo-inactive  { background: #1a1a2e; color: #6a5888; }

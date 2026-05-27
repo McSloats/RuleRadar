@@ -8,7 +8,7 @@
 
 {# ═══ Repositories & Scan Status ══════════════════════════════════════════════ #}
 <div class="card">
-  <div class="card-title">📡 Repositories &amp; Scan Schedule</div>
+  <div class="card-title">⏱ Repositories &amp; Scan Schedule</div>
 
   <div class="scan-status-grid">
 
@@ -27,37 +27,12 @@
       </p>
     </div>
 
-    {# GitHub token (optional) #}
-    <div class="scan-stat-cell">
-      <p class="scan-stat-label">GitHub Token <span class="text-muted">(optional)</span></p>
-      {% if token_is_set %}
-        <p class="scan-stat-value" style="font-family:monospace; font-size:0.82rem;
-           letter-spacing:0.03em; color:#68d391;">
-          {{ token_display }}
-        </p>
-        <p class="text-muted text-small" style="margin-top:0.25rem;">
-          ✓ Token set — used for releases API only
-          {% if current_user.is_admin %}
-            · <a href="{{ url_for('admin') }}">Change in Admin panel</a>
-          {% endif %}
-        </p>
-      {% else %}
-        <p class="scan-stat-value text-muted" style="font-size:0.85rem;">Not set (unauthenticated)</p>
-        <p class="text-small text-muted" style="margin-top:0.25rem;">
-          Repos are cloned via git — no token required.
-          {% if current_user.is_admin %}
-            <a href="{{ url_for('admin') }}">Optionally set one in Admin →</a>
-          {% endif %}
-        </p>
-      {% endif %}
-    </div>
-
   </div>
 
   {# Per-repo status #}
   {% if repos %}
   <hr class="divider" style="margin-top:0.25rem;">
-  <p style="font-size:0.8rem; font-weight:600; color:#a0aec0; margin-bottom:0.6rem;">
+  <p style="font-size:0.8rem; font-weight:600; color:#9080b8; margin-bottom:0.6rem;">
     Monitored Repositories
   </p>
   <div style="display:flex; flex-wrap:wrap; gap:0.5rem;">
@@ -92,7 +67,7 @@
 .repo-chip-time   { color: #6a5888; font-style: italic; }
 .repo-chip-ready   .repo-chip-status { color: #6ee7b7; }
 .repo-chip-cloning .repo-chip-status,
-.repo-chip-indexing .repo-chip-status { color: #90cdf4; }
+.repo-chip-indexing .repo-chip-status { color: #c4b5fd; }
 .repo-chip-error   .repo-chip-status { color: #fc8181; }
 </style>
 
@@ -221,7 +196,7 @@
     </div>
     <div class="form-row" style="margin-bottom:0.9rem;">
       <div style="flex:1; min-width:140px;">
-        <label style="display:block; font-size:0.8rem; color:#a0aec0; margin-bottom:0.3rem;">Source</label>
+        <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">Source</label>
         <select name="source" class="wide">
           <option value="">All Sources</option>
           <option value="sigma">Sigma</option>
@@ -229,7 +204,7 @@
         </select>
       </div>
       <div style="flex:1; min-width:140px;">
-        <label style="display:block; font-size:0.8rem; color:#a0aec0; margin-bottom:0.3rem;">Change Type</label>
+        <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">Change Type</label>
         <select name="change_type" class="wide">
           <option value="">All Changes</option>
           <option value="new">New</option>
@@ -237,13 +212,13 @@
         </select>
       </div>
       <div style="flex:2; min-width:200px;">
-        <label style="display:block; font-size:0.8rem; color:#a0aec0; margin-bottom:0.3rem;">
+        <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">
           Search Query <span class="text-muted">(optional)</span>
         </label>
         <input type="text" name="q" class="wide" placeholder="keyword or phrase">
       </div>
       <div style="flex:1; min-width:140px;">
-        <label style="display:block; font-size:0.8rem; color:#a0aec0; margin-bottom:0.3rem;">
+        <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">
           MITRE TTP <span class="text-muted">(optional)</span>
         </label>
         <input type="text" name="mitre" class="wide" placeholder="e.g. T1059 or Execution">

@@ -11,13 +11,12 @@ Pages
   /detections     → searchable table of every known detection rule
   /updates        → feed of new/modified/deleted rule events
   /settings       → per-user: password, Discord webhook, saved filters
-  /admin          → admin-only: GitHub token, repository management, user management
+  /admin          → admin-only: repository management, user management
   /admin/activity → admin-only: activity log
 
 Scan policy
 -----------
-  * Scans use git clone / git fetch — no GitHub API rate limits.
-  * A GitHub token is optional (used only for releases API, ~2 calls/scan).
+  * Scans use git clone / git fetch — no GitHub API rate limits, no auth needed.
   * The first scan fires when an admin enables repos on /setup-repos.
   * Subsequent scans are owned by the scheduler process (scheduler.py),
     which runs at every even UTC hour (00:00, 02:00, … 22:00).
@@ -130,7 +129,7 @@ _REPO_GATE_SKIP = {
     "api_scan_status",   # nav badge polls this even on the setup page
     "health", "static",
     # Admin routes must stay accessible so the admin can fix a broken config
-    "admin", "admin_config", "admin_add_user",
+    "admin", "admin_add_user",
     "admin_toggle_admin", "admin_reset_password", "admin_delete_user",
     "admin_activity",
     "admin_repos_add", "admin_repos_toggle", "admin_repos_remove",
@@ -412,15 +411,6 @@ def settings():
     except (json.JSONDecodeError, TypeError):
         saved_filters = []
 
-    # GitHub token — optional, used only for releases API
-    github_token  = db.get_app_config("github_token")
-    token_display = ""
-    if github_token:
-        if len(github_token) > 12:
-            token_display = github_token[:8] + "●" * 8 + github_token[-4:]
-        else:
-            token_display = github_token[:4] + "●" * max(0, len(github_token) - 4)
-
     # Scan schedule
     status            = db.get_scan_status()
     last_scan         = status.get("last_scan")
@@ -437,8 +427,6 @@ def settings():
         "settings.html",
         user_settings=user_settings,
         saved_filters=saved_filters,
-        token_display=token_display,
-        token_is_set=ruleradar._is_real_token(github_token),
         last_scan_display=last_scan_display,
         next_scan_display=next_scan_display,
         repos=repos,
@@ -571,15 +559,8 @@ def settings_filters_delete():
 @app.route("/admin")
 @admin_required
 def admin():
-    users        = db.get_all_users()
-    repos        = db.get_all_repos()
-    github_token = db.get_app_config("github_token")
-    token_display = ""
-    if github_token:
-        if len(github_token) > 12:
-            token_display = github_token[:8] + "●" * 8 + github_token[-4:]
-        else:
-            token_display = github_token[:4] + "●" * max(0, len(github_token) - 4)
+    users  = db.get_all_users()
+    repos  = db.get_all_repos()
 
     # Which available repos are not yet configured
     configured_names = {r["name"] for r in repos}
@@ -593,22 +574,8 @@ def admin():
         users=users,
         repos=repos,
         unconfigured=unconfigured,
-        github_token=github_token,
-        token_display=token_display,
         current_user_id=current_user.id,
     )
-
-
-@app.route("/admin/config", methods=["POST"])
-@admin_required
-def admin_config():
-    token = request.form.get("github_token", "").strip()
-    db.set_app_config("github_token", token)
-    db.log_activity("admin",
-                    "GitHub token updated" if token else "GitHub token cleared",
-                    actor=current_user.username)
-    flash("GitHub token saved.", "success")
-    return redirect(url_for("admin"))
 
 
 # ── Admin — repository management ──────────────────────────────────────────────
@@ -884,10 +851,6 @@ def api_repo_sizes():
             req = urllib.request.Request(url)
             req.add_header("User-Agent", "ruleradar/1.0")
             req.add_header("Accept", "application/vnd.github.v3+json")
-            # Use stored token if available (higher rate limit for this call)
-            token = db.get_app_config("github_token")
-            if ruleradar._is_real_token(token):
-                req.add_header("Authorization", f"Bearer {token}")
             with urllib.request.urlopen(req, timeout=10) as r:
                 data = json.loads(r.read())
             size_kb  = data.get("size", 0)

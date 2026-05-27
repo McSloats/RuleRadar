@@ -35,14 +35,6 @@ CREATE TABLE IF NOT EXISTS user_settings (
     saved_filters   TEXT    NOT NULL DEFAULT '[]'
 );
 
--- ── App-level configuration ───────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS app_config (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL DEFAULT ''
-);
-
-INSERT OR IGNORE INTO app_config (key, value) VALUES ('github_token', '');
-
 -- ── Monitored repositories ────────────────────────────────────────────────────
 -- Each row represents one GitHub repository being cloned and scanned.
 -- status: 'pending' | 'cloning' | 'indexing' | 'ready' | 'error' | 'inactive'
@@ -193,25 +185,6 @@ def _migrate_schema(conn: sqlite3.Connection):
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-# ── App-level config ───────────────────────────────────────────────────────────
-
-def get_app_config(key: str, default: str = "") -> str:
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT value FROM app_config WHERE key = ?", (key,)
-        ).fetchone()
-        return row["value"] if row else default
-
-
-def set_app_config(key: str, value: str):
-    with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO app_config (key, value) VALUES (?, ?) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (key, value),
-        )
 
 
 # ── User helpers ───────────────────────────────────────────────────────────────
@@ -593,19 +566,39 @@ def record_update(
 def get_updates(
     source: str = "", change_type: str = "", limit: int = 100, offset: int = 0
 ) -> tuple[list[dict], int]:
-    conditions, params = [], []
+    """
+    Return paginated update events, newest first.
+
+    Each row is augmented with metadata from the current detections table
+    (author, rule_status, rule_date, description, refs) via a LEFT JOIN so
+    that the expand panel can show full rule context.  Deleted rules will
+    have empty strings for those fields.
+    """
+    conds, params = [], []
     if source:
-        conditions.append("source = ?")
+        conds.append("u.source = ?")
         params.append(source)
     if change_type:
-        conditions.append("change_type = ?")
+        conds.append("u.change_type = ?")
         params.append(change_type)
 
-    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
     with get_conn() as conn:
-        total = conn.execute(f"SELECT COUNT(*) FROM updates {where}", params).fetchone()[0]
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM updates u {where}", params
+        ).fetchone()[0]
         rows = conn.execute(
-            f"SELECT * FROM updates {where} ORDER BY detected_at DESC LIMIT ? OFFSET ?",
+            f"""SELECT u.*,
+                       COALESCE(d.author,      '') AS author,
+                       COALESCE(d.rule_status, '') AS rule_status,
+                       COALESCE(d.rule_date,   '') AS rule_date,
+                       COALESCE(d.description, '') AS description,
+                       COALESCE(d.refs,        '') AS refs
+                FROM updates u
+                LEFT JOIN detections d
+                       ON d.source = u.source AND d.file_path = u.file_path
+                {where}
+                ORDER BY u.detected_at DESC LIMIT ? OFFSET ?""",
             params + [limit, offset],
         ).fetchall()
 
