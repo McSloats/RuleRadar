@@ -29,9 +29,11 @@
     <option value="splunk" {% if source == 'splunk'  %}selected{% endif %}>Splunk</option>
   </select>
   <select name="change_type">
-    <option value=""         {% if not change_type           %}selected{% endif %}>All Changes</option>
-    <option value="new"      {% if change_type == 'new'      %}selected{% endif %}>New</option>
-    <option value="modified" {% if change_type == 'modified' %}selected{% endif %}>Modified</option>
+    <option value=""          {% if not change_type            %}selected{% endif %}>All Changes</option>
+    <option value="new"       {% if change_type == 'new'       %}selected{% endif %}>New</option>
+    <option value="modified"  {% if change_type == 'modified'  %}selected{% endif %}>Modified</option>
+    <option value="deleted"   {% if change_type == 'deleted'   %}selected{% endif %}>Deleted</option>
+    <option value="renamed"   {% if change_type == 'renamed'   %}selected{% endif %}>Renamed</option>
   </select>
   <button type="submit" class="btn btn-primary">Filter</button>
   {% if source or change_type %}
@@ -134,7 +136,9 @@
     {% if source or change_type %}
       No updates found matching your filters.
     {% else %}
-      No updates recorded yet.<br>The initial scan is running in the background — check back shortly.
+      No updates recorded yet.<br>
+      Updates appear here after the first git sync completes.
+      The scan badge in the top bar shows current progress.
     {% endif %}
   </p>
 </div>

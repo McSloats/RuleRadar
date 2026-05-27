@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
 """
-RuleRadar — security detection monitor for:
-  - SigmaHQ/sigma (rules directories)
-  - splunk/security_content (develop branch, detections/)
+RuleRadar — security detection monitor using local git clones.
 
-Scans both repos for new/modified rules, persists everything to the
-local SQLite database, and sends a brief Discord notification to every
-user who has configured a personal webhook.
+Repositories are cloned with git (no rate limits) and kept up to date
+via git fetch + diff.  The GitHub REST API is used only for releases
+metadata (2 calls per scan, well within the unauthenticated 60/hr limit)
+and optional token validation in the admin panel.
+
+Scanning flow
+-------------
+  First run (status='pending'):
+    clone_repo()  → git clone --depth=1
+    index_repo()  → walk every YAML file and upsert into DB
+
+  Subsequent runs (status='ready'):
+    sync_repo()   → git fetch, diff old SHA vs FETCH_HEAD, process changed files
 
 Call run_scan() directly to trigger a scan from any other module.
 GitHub token and Discord webhooks are read from the database (configured
@@ -16,43 +24,71 @@ via the web admin panel); no config.json is needed.
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
+import subprocess
 import sys
 import threading
 import urllib.error
 import urllib.request
-import base64
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import database as db
 
-# ── dependencies (install via: pip install -r requirements.txt) ───────────────
+# ── Optional Python dependencies ───────────────────────────────────────────────
 try:
     import yaml
     YAML_AVAILABLE = True
 except ImportError:
-    YAML_AVAILABLE = False  # falls back to a basic line parser; install pyyaml
+    YAML_AVAILABLE = False
 
 try:
     from sigma.collection import SigmaCollection
     from sigma.backends.splunk import SplunkBackend
     SIGMA_BACKEND_AVAILABLE = True
 except ImportError:
-    SIGMA_BACKEND_AVAILABLE = False  # Sigma→SPL conversion disabled; install pySigma-backend-splunk
+    SIGMA_BACKEND_AVAILABLE = False
 
-# ── constants ──────────────────────────────────────────────────────────────────
-SIGMA_REPO  = {"owner": "SigmaHQ", "repo": "sigma",            "branch": "master"}
-SPLUNK_REPO = {"owner": "splunk",  "repo": "security_content",  "branch": "develop"}
+# ── Constants ──────────────────────────────────────────────────────────────────
 
-SIGMA_PATHS = [
-    "rules/", "rules-emerging-threats/",
-    "rules-threat-hunting/", "rules-compliance/", "rules-placeholder/",
-]
-SPLUNK_PATHS = ["detections/"]
+# Root directory for all cloned repositories.  Lives alongside the database
+# so it is included in the Docker named volume and survives container restarts.
+REPOS_DIR: Path = db.DB_PATH.parent / "repos"
 
 # Prevent concurrent scans across threads
 _scan_lock = threading.Lock()
+
+# Pre-defined repositories that can be enabled via the setup-repos page.
+# Admins can add custom repos via the admin panel.
+AVAILABLE_REPOS: dict[str, dict] = {
+    "sigma": {
+        "name":         "sigma",
+        "display_name": "SigmaHQ / sigma",
+        "description":  "Community Sigma detection rules for SIEM platforms (4,000+ rules)",
+        "owner":        "SigmaHQ",
+        "repo":         "sigma",
+        "branch":       "master",
+        "paths":        [
+            "rules/",
+            "rules-emerging-threats/",
+            "rules-threat-hunting/",
+            "rules-compliance/",
+        ],
+        "parser":       "sigma",
+    },
+    "splunk": {
+        "name":         "splunk",
+        "display_name": "splunk / security_content",
+        "description":  "Splunk's official security content and detection rules (1,000+ detections)",
+        "owner":        "splunk",
+        "repo":         "security_content",
+        "branch":       "develop",
+        "paths":        ["detections/"],
+        "parser":       "splunk",
+    },
+}
 
 # ── MITRE ATT&CK tactic slug → display name ───────────────────────────────────
 MITRE_TACTICS: dict[str, str] = {
@@ -76,18 +112,18 @@ MITRE_TACTICS: dict[str, str] = {
 _TECHNIQUE_RE = re.compile(r"^t\d{4}(\.\d{3})?$")
 
 
-# ── GitHub helpers ─────────────────────────────────────────────────────────────
+# ── GitHub REST API helpers (used only for releases + token validation) ────────
 
 def _is_real_token(token: str) -> bool:
     """Return True only if the token looks like an actual GitHub token."""
     if not token:
         return False
-    # GitHub tokens start with a known prefix; reject obvious placeholders
     known_prefixes = ("ghp_", "github_pat_", "ghs_", "gho_", "v1.")
     return any(token.startswith(p) for p in known_prefixes)
 
 
-def gh(url: str, token: str) -> dict | list | None:
+def _gh(url: str, token: str = "") -> dict | list | None:
+    """Minimal GitHub REST helper — used only for releases and token validation."""
     req = urllib.request.Request(url)
     if _is_real_token(token):
         req.add_header("Authorization", f"Bearer {token}")
@@ -104,55 +140,58 @@ def gh(url: str, token: str) -> dict | list | None:
         return None
 
 
-def commits_since(owner, repo, branch, since_iso, token):
-    url = (
-        f"https://api.github.com/repos/{owner}/{repo}/commits"
-        f"?sha={branch}&since={since_iso}&per_page=100"
-    )
-    return gh(url, token) or []
-
-
-def commit_files(owner, repo, sha, token):
-    data = gh(f"https://api.github.com/repos/{owner}/{repo}/commits/{sha}", token)
-    return (data or {}).get("files", [])
-
-
-def releases_since(owner, repo, since_dt, token):
-    data = gh(
+def releases_since(owner: str, repo: str, since_dt: datetime, token: str = ""):
+    """Fetch recent GitHub releases newer than since_dt (uses the REST API)."""
+    data = _gh(
         f"https://api.github.com/repos/{owner}/{repo}/releases?per_page=10", token
     ) or []
     cutoff = since_dt.isoformat().replace("+00:00", "Z")
     return [r for r in data if (r.get("published_at") or "") >= cutoff]
 
 
-def file_content(owner, repo, path, ref, token) -> str | None:
-    data = gh(
-        f"https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={ref}", token
-    )
-    if data and "content" in data:
-        return base64.b64decode(data["content"]).decode("utf-8", errors="replace")
-    return None
-
-
-def git_tree(owner: str, repo: str, branch: str, token: str) -> list[dict]:
+def validate_token(token: str) -> dict:
     """
-    Fetch the complete recursive file tree via the git/trees API.
-    Returns the list of tree entries (dicts with 'path', 'type', 'sha', etc.).
-    Warns if the response was truncated (repo too large for one call).
+    Verify a GitHub personal access token via the rate_limit endpoint.
+
+    Returns:
+        {"valid": True,  "limit": 5000, "remaining": 4995}
+        {"valid": False, "limit": 0,    "error": "...reason..."}
+
+    The GitHub token is now optional — repos are cloned without one.
+    This endpoint is used only in the admin panel as a convenience check.
     """
-    data = gh(
-        f"https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1",
-        token,
-    )
-    if not data or "tree" not in data:
-        return []
-    if data.get("truncated"):
-        print(
-            f"  WARNING: git tree for {owner}/{repo} was truncated — "
-            "some files may be missed during catalog scan.",
-            file=sys.stderr,
-        )
-    return data["tree"]
+    if not _is_real_token(token):
+        return {
+            "valid": False, "limit": 0,
+            "error": "Token format not recognised — must start with ghp_, github_pat_, etc.",
+        }
+    try:
+        req = urllib.request.Request("https://api.github.com/rate_limit")
+        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("User-Agent", "ruleradar/1.0")
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read())
+        rate      = data.get("rate", {})
+        limit     = rate.get("limit", 0)
+        remaining = rate.get("remaining", 0)
+        if limit >= 5000:
+            return {"valid": True, "limit": limit, "remaining": remaining}
+        return {
+            "valid": False, "limit": limit, "remaining": remaining,
+            "error": f"Token accepted but rate limit is only {limit}/hr (expected 5,000+). "
+                     "Check that the token has public_repo scope.",
+        }
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            return {
+                "valid": False, "limit": 0,
+                "error": "GitHub rejected the token (401 Unauthorized). "
+                         "Check that the token hasn't expired or been revoked.",
+            }
+        return {"valid": False, "limit": 0,
+                "error": f"GitHub API returned HTTP {e.code}."}
+    except Exception as e:
+        return {"valid": False, "limit": 0, "error": str(e)}
 
 
 # ── YAML / content helpers ─────────────────────────────────────────────────────
@@ -199,10 +238,6 @@ def sigma_to_spl(yaml_text: str) -> str | None:
         return None
 
 
-def is_rule_file(fname: str, paths: list) -> bool:
-    return any(fname.startswith(p) for p in paths) and fname.endswith((".yml", ".yaml"))
-
-
 def clean_title_fallback(fname: str) -> str:
     """Generate a readable title from a filename when no title field is present."""
     base = fname.split("/")[-1]
@@ -222,12 +257,10 @@ def extract_sigma_mitre(meta: dict) -> tuple[str, str]:
     Sigma tags look like:
         tags:
           - attack.execution           ← tactic slug
-          - attack.t1059               ← technique (no sub)
+          - attack.t1059               ← technique
           - attack.t1059.001           ← technique + sub-technique
 
-    Returns a tuple of pipe-separated strings:
-        (techniques, tactics)
-        e.g. ("T1059|T1059.001", "Execution")
+    Returns (pipe-joined techniques, pipe-joined tactic display names).
     """
     tags = meta.get("tags") or []
     if not isinstance(tags, list):
@@ -242,7 +275,7 @@ def extract_sigma_mitre(meta: dict) -> tuple[str, str]:
         tag = str(tag).lower()
         if not tag.startswith("attack."):
             continue
-        part = tag[7:]  # strip "attack."
+        part = tag[7:]
         if _TECHNIQUE_RE.match(part):
             uid = part.upper()
             if uid not in seen_t:
@@ -261,25 +294,12 @@ def extract_splunk_mitre(meta: dict) -> tuple[str, str]:
     """
     Parse MITRE ATT&CK data from a Splunk security_content detection's 'tags' dict.
 
-    Splunk tags look like:
-        tags:
-          mitre_attack_id:
-            - T1059.001
-          mitre_attack_enrichments:
-            - mitre_attack_id: T1059.001
-              mitre_attack_technique: 'Command and Scripting Interpreter: PowerShell'
-              mitre_attack_tactic:
-                - Execution
-              mitre_attack_tactic_id:
-                - TA0002
-
-    Returns (techniques, tactics) as pipe-separated strings.
+    Returns (pipe-joined techniques, pipe-joined tactic names).
     """
     tags = meta.get("tags") or {}
     if not isinstance(tags, dict):
         return "", ""
 
-    # ── Techniques from mitre_attack_id ──────────────────────────────────────
     raw_ids = tags.get("mitre_attack_id") or []
     if isinstance(raw_ids, str):
         raw_ids = [raw_ids]
@@ -291,7 +311,6 @@ def extract_splunk_mitre(meta: dict) -> tuple[str, str]:
             seen_t.add(uid)
             techniques.append(uid)
 
-    # ── Tactics from mitre_attack_enrichments ────────────────────────────────
     enrichments = tags.get("mitre_attack_enrichments") or []
     seen_ta: set[str] = set()
     tactics: list[str] = []
@@ -311,296 +330,371 @@ def extract_splunk_mitre(meta: dict) -> tuple[str, str]:
     return "|".join(techniques), "|".join(tactics)
 
 
-# ── Repository scanners ────────────────────────────────────────────────────────
+# ── Git helpers ────────────────────────────────────────────────────────────────
 
-def scan_sigma(since_iso: str, token: str) -> tuple[int, int]:
+def git_run(args: list[str], cwd: str | None = None, timeout: int = 600) -> tuple[int, str]:
     """
-    Scan SigmaHQ/sigma for new and modified rules since *since_iso*.
-    Saves each rule to the database and records change events.
-    Returns (new_count, modified_count).
+    Run a git command and return (returncode, combined_output).
+    timeout : seconds to wait before killing the process (default 10 min).
     """
-    owner, repo, branch = SIGMA_REPO["owner"], SIGMA_REPO["repo"], SIGMA_REPO["branch"]
-    commits = commits_since(owner, repo, branch, since_iso, token)
-    print(f"  SigmaHQ/sigma: {len(commits)} commits in window", flush=True)
-
-    new_count, mod_count, seen = 0, 0, set()
-
-    for c in commits:
-        for f in commit_files(owner, repo, c["sha"], token):
-            fname = f.get("filename", "")
-            if fname in seen or not is_rule_file(fname, SIGMA_PATHS):
-                continue
-            seen.add(fname)
-
-            text  = file_content(owner, repo, fname, branch, token)
-            meta  = parse_yaml(text) if text else {}
-            spl   = sigma_to_spl(text) if text else None
-            logic = sigma_detection_block(text or "")
-
-            title           = str(meta.get("title", "")).strip() or clean_title_fallback(fname)
-            description     = str(meta.get("description", ""))[:350]
-            author          = str(meta.get("author", ""))[:200]
-            rule_status     = str(meta.get("status", ""))[:50]
-            severity        = str(meta.get("level", ""))[:50]
-            rule_date       = str(meta.get("date", ""))[:20]
-            refs_raw        = meta.get("references") or []
-            refs            = "\n".join(str(r) for r in refs_raw) if isinstance(refs_raw, list) else str(refs_raw)
-            refs            = refs[:500]
-            rule_url        = f"https://github.com/{owner}/{repo}/blob/{branch}/{fname}"
-            techniques, tactics = extract_sigma_mitre(meta)
-
-            is_new = db.upsert_detection(
-                "sigma", fname, title, description, logic, spl or "", rule_url,
-                mitre_techniques=techniques, mitre_tactics=tactics,
-                author=author, rule_status=rule_status, severity=severity,
-                rule_date=rule_date, refs=refs,
-            )
-
-            status = f.get("status", "modified")
-            if status == "added":
-                change_type = "new"
-                new_count += 1
-            elif status in ("modified", "renamed", "changed"):
-                change_type = "modified"
-                mod_count += 1
-            else:
-                continue
-
-            db.record_update("sigma", fname, title, change_type, logic, spl or "", rule_url)
-
-    return new_count, mod_count
-
-
-def scan_splunk(since_iso: str, token: str) -> tuple[int, int]:
-    """
-    Scan splunk/security_content for new and modified detections since *since_iso*.
-    Saves each detection to the database and records change events.
-    Returns (new_count, modified_count).
-    """
-    owner, repo, branch = SPLUNK_REPO["owner"], SPLUNK_REPO["repo"], SPLUNK_REPO["branch"]
-    commits = commits_since(owner, repo, branch, since_iso, token)
-    print(f"  splunk/security_content: {len(commits)} commits in window", flush=True)
-
-    new_count, mod_count, seen = 0, 0, set()
-
-    for c in commits:
-        for f in commit_files(owner, repo, c["sha"], token):
-            fname = f.get("filename", "")
-            if fname in seen or not is_rule_file(fname, SPLUNK_PATHS):
-                continue
-            seen.add(fname)
-
-            text  = file_content(owner, repo, fname, branch, token)
-            meta  = parse_yaml(text) if text else {}
-
-            # Prefer the structured 'search' field; fall back to line scan
-            search = str(meta.get("search", ""))
-            if not search and text:
-                for line in text.splitlines():
-                    if line.startswith("search:"):
-                        search = line[7:].strip()
-                        break
-
-            title           = str(meta.get("name", "")).strip() or clean_title_fallback(fname)
-            description     = str(meta.get("description", ""))[:350]
-            author          = str(meta.get("author", ""))[:200]
-            rule_status     = str(meta.get("status", ""))[:50]
-            severity        = ""  # Splunk uses 'tags.risk_score' — not a simple field
-            rule_date       = str(meta.get("date", ""))[:20]
-            refs_raw        = meta.get("references") or []
-            refs            = "\n".join(str(r) for r in refs_raw) if isinstance(refs_raw, list) else str(refs_raw)
-            refs            = refs[:500]
-            rule_url        = f"https://github.com/{owner}/{repo}/blob/{branch}/{fname}"
-            techniques, tactics = extract_splunk_mitre(meta)
-
-            db.upsert_detection(
-                "splunk", fname, title, description, "", search[:500], rule_url,
-                mitre_techniques=techniques, mitre_tactics=tactics,
-                author=author, rule_status=rule_status, severity=severity,
-                rule_date=rule_date, refs=refs,
-            )
-
-            status = f.get("status", "modified")
-            if status == "added":
-                change_type = "new"
-                new_count += 1
-            elif status in ("modified", "renamed", "changed"):
-                change_type = "modified"
-                mod_count += 1
-            else:
-                continue
-
-            db.record_update("splunk", fname, title, change_type, "", search[:500], rule_url)
-
-    return new_count, mod_count
-
-
-# ── Catalog scanners (full repo enumeration) ───────────────────────────────────
-
-def catalog_scan_sigma(token: str) -> int:
-    """
-    Enumerate ALL sigma rule files via the git tree API and fetch any
-    that aren't already in the database.  Returns the number of rules added.
-
-    Only meaningful when a real GitHub token is available (5 000 req/hr);
-    without one the caller falls back to a 30-day incremental window.
-    """
-    owner, repo, branch = SIGMA_REPO["owner"], SIGMA_REPO["repo"], SIGMA_REPO["branch"]
-
-    print("  Sigma catalog: fetching file tree…", flush=True)
-    tree = git_tree(owner, repo, branch, token)
-
-    rule_files = [
-        item["path"] for item in tree
-        if item.get("type") == "blob"
-        and is_rule_file(item.get("path", ""), SIGMA_PATHS)
-    ]
-    print(f"  Sigma catalog: {len(rule_files)} rule files in repo", flush=True)
-
-    existing  = db.get_existing_detection_paths("sigma")
-    to_fetch  = [f for f in rule_files if f not in existing]
-    print(f"  Sigma catalog: {len(to_fetch)} new files to index", flush=True)
-
-    added = 0
-    for i, fname in enumerate(to_fetch, 1):
-        if i % 100 == 0:
-            print(f"    … {i}/{len(to_fetch)} sigma files fetched", flush=True)
-
-        text  = file_content(owner, repo, fname, branch, token)
-        if not text:
-            continue
-        meta  = parse_yaml(text)
-        spl   = sigma_to_spl(text)
-        logic = sigma_detection_block(text)
-
-        title           = str(meta.get("title", "")).strip() or clean_title_fallback(fname)
-        description     = str(meta.get("description", ""))[:350]
-        author          = str(meta.get("author", ""))[:200]
-        rule_status     = str(meta.get("status", ""))[:50]
-        severity        = str(meta.get("level", ""))[:50]
-        rule_date       = str(meta.get("date", ""))[:20]
-        refs_raw        = meta.get("references") or []
-        refs            = "\n".join(str(r) for r in refs_raw) if isinstance(refs_raw, list) else str(refs_raw)
-        refs            = refs[:500]
-        rule_url        = f"https://github.com/{owner}/{repo}/blob/{branch}/{fname}"
-        techniques, tactics = extract_sigma_mitre(meta)
-
-        db.upsert_detection(
-            "sigma", fname, title, description, logic, spl or "", rule_url,
-            mitre_techniques=techniques, mitre_tactics=tactics,
-            author=author, rule_status=rule_status, severity=severity,
-            rule_date=rule_date, refs=refs,
-        )
-        added += 1
-
-    print(f"  Sigma catalog: done — {added} rules indexed", flush=True)
-    return added
-
-
-def catalog_scan_splunk(token: str) -> int:
-    """
-    Enumerate ALL splunk/security_content detection files via the git tree API
-    and fetch any not already in the database.  Returns the number added.
-    """
-    owner, repo, branch = SPLUNK_REPO["owner"], SPLUNK_REPO["repo"], SPLUNK_REPO["branch"]
-
-    print("  Splunk catalog: fetching file tree…", flush=True)
-    tree = git_tree(owner, repo, branch, token)
-
-    rule_files = [
-        item["path"] for item in tree
-        if item.get("type") == "blob"
-        and is_rule_file(item.get("path", ""), SPLUNK_PATHS)
-    ]
-    print(f"  Splunk catalog: {len(rule_files)} detection files in repo", flush=True)
-
-    existing  = db.get_existing_detection_paths("splunk")
-    to_fetch  = [f for f in rule_files if f not in existing]
-    print(f"  Splunk catalog: {len(to_fetch)} new files to index", flush=True)
-
-    added = 0
-    for i, fname in enumerate(to_fetch, 1):
-        if i % 100 == 0:
-            print(f"    … {i}/{len(to_fetch)} splunk files fetched", flush=True)
-
-        text  = file_content(owner, repo, fname, branch, token)
-        if not text:
-            continue
-        meta  = parse_yaml(text)
-
-        search = str(meta.get("search", ""))
-        if not search and text:
-            for line in text.splitlines():
-                if line.startswith("search:"):
-                    search = line[7:].strip()
-                    break
-
-        title           = str(meta.get("name", "")).strip() or clean_title_fallback(fname)
-        description     = str(meta.get("description", ""))[:350]
-        author          = str(meta.get("author", ""))[:200]
-        rule_status     = str(meta.get("status", ""))[:50]
-        rule_date       = str(meta.get("date", ""))[:20]
-        refs_raw        = meta.get("references") or []
-        refs            = "\n".join(str(r) for r in refs_raw) if isinstance(refs_raw, list) else str(refs_raw)
-        refs            = refs[:500]
-        rule_url        = f"https://github.com/{owner}/{repo}/blob/{branch}/{fname}"
-        techniques, tactics = extract_splunk_mitre(meta)
-
-        db.upsert_detection(
-            "splunk", fname, title, description, "", search[:500], rule_url,
-            mitre_techniques=techniques, mitre_tactics=tactics,
-            author=author, rule_status=rule_status, severity="",
-            rule_date=rule_date, refs=refs,
-        )
-        added += 1
-
-    print(f"  Splunk catalog: done — {added} detections indexed", flush=True)
-    return added
-
-
-# ── Token validation helper ───────────────────────────────────────────────────
-
-def validate_token(token: str) -> dict:
-    """
-    Verify a GitHub personal access token by hitting the rate_limit endpoint.
-
-    Returns a dict:
-        {"valid": True,  "limit": 5000, "remaining": 4995}
-        {"valid": False, "limit": 0,    "error": "...reason..."}
-
-    A valid token must be recognised by _is_real_token() AND accepted by GitHub
-    (HTTP 200 from /rate_limit). Unauthenticated calls return limit=60, so we
-    require limit >= 5000 to confirm the token actually authenticated.
-    """
-    if not _is_real_token(token):
-        return {"valid": False, "limit": 0,
-                "error": "Token format not recognised — must start with ghp_, github_pat_, etc."}
     try:
-        req = urllib.request.Request("https://api.github.com/rate_limit")
-        req.add_header("Authorization", f"Bearer {token}")
-        req.add_header("User-Agent", "ruleradar/1.0")
-        with urllib.request.urlopen(req, timeout=10) as r:
-            data = json.loads(r.read())
-        rate      = data.get("rate", {})
-        limit     = rate.get("limit", 0)
-        remaining = rate.get("remaining", 0)
-        if limit >= 5000:
-            return {"valid": True, "limit": limit, "remaining": remaining}
-        # Token accepted but unusually low limit — report it so the user knows
-        return {
-            "valid": False, "limit": limit, "remaining": remaining,
-            "error": f"Token accepted but rate limit is only {limit}/hr (expected 5 000+). "
-                     "Check that the token has public_repo scope.",
-        }
-    except urllib.error.HTTPError as e:
-        if e.code == 401:
-            return {"valid": False, "limit": 0,
-                    "error": "GitHub rejected the token (401 Unauthorized). "
-                             "Check that the token hasn't expired or been revoked."}
-        return {"valid": False, "limit": 0,
-                "error": f"GitHub API returned HTTP {e.code}."}
+        result = subprocess.run(
+            ["git"] + args,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        output = (result.stdout or "") + (result.stderr or "")
+        return result.returncode, output.strip()
+    except subprocess.TimeoutExpired:
+        return 1, f"git command timed out after {timeout}s"
+    except FileNotFoundError:
+        return 1, "git not found — ensure git is installed"
     except Exception as e:
-        return {"valid": False, "limit": 0, "error": str(e)}
+        return 1, str(e)
+
+
+# ── File-level parsers ─────────────────────────────────────────────────────────
+
+def _process_sigma(source: str, rel_path: str, text: str, rule_url: str) -> tuple[bool, str]:
+    """
+    Parse a Sigma rule file and upsert it into the database.
+    Returns (is_new, title).
+    """
+    meta  = parse_yaml(text)
+    spl   = sigma_to_spl(text)
+    logic = sigma_detection_block(text)
+
+    title       = str(meta.get("title",       "")).strip() or clean_title_fallback(rel_path)
+    description = str(meta.get("description", ""))[:350]
+    author      = str(meta.get("author",      ""))[:200]
+    rule_status = str(meta.get("status",      ""))[:50]
+    severity    = str(meta.get("level",       ""))[:50]
+    rule_date   = str(meta.get("date",        ""))[:20]
+    refs_raw    = meta.get("references") or []
+    refs        = (
+        "\n".join(str(r) for r in refs_raw)
+        if isinstance(refs_raw, list) else str(refs_raw)
+    )[:500]
+    techniques, tactics = extract_sigma_mitre(meta)
+
+    is_new = db.upsert_detection(
+        source, rel_path, title, description, logic, spl or "", rule_url,
+        mitre_techniques=techniques, mitre_tactics=tactics,
+        author=author, rule_status=rule_status, severity=severity,
+        rule_date=rule_date, refs=refs,
+    )
+    return is_new, title
+
+
+def _process_splunk(source: str, rel_path: str, text: str, rule_url: str) -> tuple[bool, str]:
+    """
+    Parse a Splunk security_content YAML file and upsert it into the database.
+    Returns (is_new, title).
+    """
+    meta = parse_yaml(text)
+
+    search = str(meta.get("search", ""))
+    if not search:
+        for line in text.splitlines():
+            if line.startswith("search:"):
+                search = line[7:].strip()
+                break
+
+    title       = str(meta.get("name",        "")).strip() or clean_title_fallback(rel_path)
+    description = str(meta.get("description", ""))[:350]
+    author      = str(meta.get("author",      ""))[:200]
+    rule_status = str(meta.get("status",      ""))[:50]
+    rule_date   = str(meta.get("date",        ""))[:20]
+    refs_raw    = meta.get("references") or []
+    refs        = (
+        "\n".join(str(r) for r in refs_raw)
+        if isinstance(refs_raw, list) else str(refs_raw)
+    )[:500]
+    techniques, tactics = extract_splunk_mitre(meta)
+
+    is_new = db.upsert_detection(
+        source, rel_path, title, description, "", search[:500], rule_url,
+        mitre_techniques=techniques, mitre_tactics=tactics,
+        author=author, rule_status=rule_status, severity="",
+        rule_date=rule_date, refs=refs,
+    )
+    return is_new, title
+
+
+# ── Repository operations ──────────────────────────────────────────────────────
+
+def clone_repo(repo_cfg: dict) -> bool:
+    """
+    Shallow-clone a repository to REPOS_DIR/<name>.
+    Updates the DB status during the operation.
+    Returns True on success.
+    """
+    name       = repo_cfg["name"]
+    owner      = repo_cfg["owner"]
+    repo       = repo_cfg["repo"]
+    branch     = repo_cfg["branch"]
+    local_path = repo_cfg["local_path"] or str(REPOS_DIR / name)
+    url        = f"https://github.com/{owner}/{repo}.git"
+
+    db.update_repo_status(name, "cloning")
+    db.log_activity("scan", f"Cloning {owner}/{repo}", actor="system",
+                    detail=f"branch={branch} → {local_path}")
+    print(f"  [{name}] Cloning {owner}/{repo} ({branch})…", flush=True)
+
+    # Clean up any partial clone
+    local = Path(local_path)
+    if local.exists():
+        try:
+            shutil.rmtree(str(local))
+        except Exception as e:
+            print(f"  [{name}] Warning: could not remove {local}: {e}", file=sys.stderr)
+
+    REPOS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Shallow clone with full working tree so we can read files directly from disk
+    rc, out = git_run([
+        "clone", "--depth=1", "--single-branch",
+        "--branch", branch,
+        url, str(local),
+    ])
+
+    if rc != 0:
+        msg = f"Clone failed: {out[:400]}"
+        print(f"  [{name}] {msg}", file=sys.stderr)
+        db.update_repo_status(name, "error", msg)
+        db.log_activity("scan", f"Clone failed for {name}", actor="system",
+                        detail=msg, level="error")
+        return False
+
+    # Record the HEAD commit SHA
+    rc2, sha = git_run(["rev-parse", "HEAD"], cwd=str(local))
+    if rc2 == 0 and sha:
+        db.update_repo_sha(name, sha.strip())
+
+    print(f"  [{name}] Clone complete", flush=True)
+    return True
+
+
+def index_repo(repo_cfg: dict) -> int:
+    """
+    Walk all matching YAML files in the cloned repo and upsert them into the DB.
+    Updates DB status.  Returns the number of files indexed.
+    """
+    name       = repo_cfg["name"]
+    local_path = Path(repo_cfg["local_path"])
+    paths      = json.loads(repo_cfg["paths"])
+    parser     = repo_cfg["parser"]
+    owner      = repo_cfg["owner"]
+    repo       = repo_cfg["repo"]
+    branch     = repo_cfg["branch"]
+
+    db.update_repo_status(name, "indexing")
+    db.log_activity("scan", f"Indexing {name}", actor="system",
+                    detail=f"walking {len(paths)} path(s)")
+    print(f"  [{name}] Indexing files…", flush=True)
+
+    indexed = 0
+    for sub_path in paths:
+        rule_dir = local_path / sub_path.rstrip("/")
+        if not rule_dir.exists():
+            print(f"  [{name}] Path not found: {rule_dir}", file=sys.stderr)
+            continue
+
+        for dirpath, _, filenames in os.walk(str(rule_dir)):
+            for fname in filenames:
+                if not fname.endswith((".yml", ".yaml")):
+                    continue
+                full = Path(dirpath) / fname
+                rel  = str(full.relative_to(local_path)).replace("\\", "/")
+                rule_url = f"https://github.com/{owner}/{repo}/blob/{branch}/{rel}"
+
+                try:
+                    text = full.read_text(encoding="utf-8", errors="replace")
+                except Exception as e:
+                    print(f"  [{name}] Read error {rel}: {e}", file=sys.stderr)
+                    continue
+
+                try:
+                    if parser == "sigma":
+                        _process_sigma(name, rel, text, rule_url)
+                    else:
+                        _process_splunk(name, rel, text, rule_url)
+                    indexed += 1
+                except Exception as e:
+                    print(f"  [{name}] Parse error {rel}: {e}", file=sys.stderr)
+
+                if indexed % 500 == 0:
+                    print(f"  [{name}] … {indexed} files indexed", flush=True)
+
+    db.update_repo_status(name, "ready")
+    db.log_activity("scan", f"Index complete for {name}", actor="system",
+                    detail=f"{indexed} files indexed")
+    print(f"  [{name}] Index complete — {indexed} rules", flush=True)
+    return indexed
+
+
+def sync_repo(repo_cfg: dict) -> tuple[int, int]:
+    """
+    Fetch the latest commits and process only files that changed since last_sha.
+    Returns (new_count, modified_count).
+
+    Changed files are detected via:
+        git diff --name-status <last_sha> FETCH_HEAD
+
+    Status codes from git:
+        A = Added (new file)
+        M = Modified
+        D = Deleted
+        R<n> = Renamed (old_path → new_path, similarity n%)
+    """
+    name       = repo_cfg["name"]
+    local_path = repo_cfg["local_path"]
+    branch     = repo_cfg["branch"]
+    parser     = repo_cfg["parser"]
+    last_sha   = repo_cfg["last_sha"]
+    paths      = json.loads(repo_cfg["paths"])
+    owner      = repo_cfg["owner"]
+    repo       = repo_cfg["repo"]
+
+    local = Path(local_path)
+    if not local.exists():
+        print(f"  [{name}] Local clone missing — re-queuing for clone", flush=True)
+        db.update_repo_status(name, "pending")
+        return 0, 0
+
+    print(f"  [{name}] Fetching updates…", flush=True)
+    rc, out = git_run(["fetch", "--depth=1", "origin", branch], cwd=str(local))
+    if rc != 0:
+        msg = f"Fetch failed: {out[:300]}"
+        print(f"  [{name}] {msg}", file=sys.stderr)
+        db.update_repo_status(name, "error", msg)
+        return 0, 0
+
+    # Check for new commits
+    rc, new_sha = git_run(["rev-parse", "FETCH_HEAD"], cwd=str(local))
+    new_sha = new_sha.strip()
+
+    if not new_sha or new_sha == last_sha:
+        print(f"  [{name}] No changes (SHA unchanged)", flush=True)
+        # Update timestamp even if nothing changed
+        db.update_repo_sha(name, new_sha or last_sha)
+        return 0, 0
+
+    # Compute the diff before updating the working tree
+    diff_ok = False
+    changed_files: list[tuple[str, str, str]] = []  # (status_char, old_path, new_path)
+
+    if last_sha:
+        rc_diff, diff_out = git_run(
+            ["diff", "--name-status", last_sha, "FETCH_HEAD"],
+            cwd=str(local),
+        )
+        if rc_diff == 0:
+            diff_ok = True
+            for line in diff_out.splitlines():
+                parts = line.split("\t")
+                if len(parts) < 2:
+                    continue
+                status_char = parts[0][0].upper()   # first letter: A, M, D, R, C, …
+                if status_char == "R" and len(parts) >= 3:
+                    changed_files.append((status_char, parts[1], parts[2]))
+                else:
+                    changed_files.append((status_char, parts[-1], parts[-1]))
+
+    # Apply the fetch to the working tree
+    git_run(["reset", "--hard", "FETCH_HEAD"], cwd=str(local))
+
+    new_count, mod_count = 0, 0
+
+    if diff_ok and changed_files:
+        for status_char, old_fp, new_fp in changed_files:
+            # Skip files outside our monitored paths or non-YAML
+            def _in_scope(fp: str) -> bool:
+                return (
+                    fp.endswith((".yml", ".yaml"))
+                    and any(fp.startswith(p) for p in paths)
+                )
+
+            if status_char == "D":
+                if _in_scope(old_fp):
+                    db.delete_detection(name, old_fp)
+                    db.record_update(
+                        name, old_fp, old_fp, "deleted", "", "",
+                        f"https://github.com/{owner}/{repo}/blob/{branch}/{old_fp}",
+                    )
+                continue
+
+            if status_char == "R":
+                # Handle rename: remove old, process new path
+                if _in_scope(old_fp):
+                    db.delete_detection(name, old_fp)
+                target_fp = new_fp
+            else:
+                target_fp = new_fp
+
+            if not _in_scope(target_fp):
+                continue
+
+            full = local / target_fp
+            if not full.exists():
+                continue
+
+            try:
+                text = full.read_text(encoding="utf-8", errors="replace")
+            except Exception as e:
+                print(f"  [{name}] Read error {target_fp}: {e}", file=sys.stderr)
+                continue
+
+            rule_url = f"https://github.com/{owner}/{repo}/blob/{branch}/{target_fp}"
+            try:
+                if parser == "sigma":
+                    is_new, title = _process_sigma(name, target_fp, text, rule_url)
+                else:
+                    is_new, title = _process_splunk(name, target_fp, text, rule_url)
+            except Exception as e:
+                print(f"  [{name}] Parse error {target_fp}: {e}", file=sys.stderr)
+                continue
+
+            # Determine change type for the update log
+            if status_char == "A" or (status_char == "R" and is_new):
+                change_type = "new"
+                new_count += 1
+            elif status_char == "R":
+                change_type = "renamed"
+                mod_count += 1
+            else:
+                change_type = "modified"
+                mod_count += 1
+
+            # Build appropriate spl/logic for the update record
+            if parser == "sigma":
+                meta = parse_yaml(text)
+                logic = sigma_detection_block(text)
+                spl_val = sigma_to_spl(text) or ""
+            else:
+                meta = parse_yaml(text)
+                logic = ""
+                spl_val = str(meta.get("search", ""))[:500]
+
+            db.record_update(name, target_fp, title, change_type, logic, spl_val, rule_url)
+
+    elif not diff_ok and last_sha:
+        # diff failed (e.g. last_sha was garbage-collected from shallow history).
+        # Fall back: full re-index so DB stays consistent with working tree.
+        print(
+            f"  [{name}] diff unavailable — performing full re-index",
+            flush=True,
+        )
+        index_repo(repo_cfg)
+        db.update_repo_sha(name, new_sha)
+        return 0, 0  # counts not meaningful for full re-index
+
+    db.update_repo_sha(name, new_sha)
+    db.update_repo_status(name, "ready")
+    print(f"  [{name}] Sync complete — {new_count} new / {mod_count} modified", flush=True)
+    return new_count, mod_count
 
 
 # ── Discord notification ───────────────────────────────────────────────────────
@@ -614,32 +708,26 @@ def send_discord(webhook_url: str, message: str):
         with urllib.request.urlopen(req, timeout=30) as r:
             print(f"  Discord: {r.status}", flush=True)
     except urllib.error.HTTPError as e:
-        print(f"  Discord error {e.code}: {e.read().decode(errors='replace')}", file=sys.stderr)
+        print(f"  Discord error {e.code}: {e.read().decode(errors='replace')}",
+              file=sys.stderr)
 
 
 # ── Main scan entry point ──────────────────────────────────────────────────────
 
 def run_scan(triggered_by: str = "scheduler") -> dict:
     """
-    Run a full scan cycle.  Thread-safe — returns immediately if a scan is
-    already in progress.
+    Run a full scan cycle across all enabled repositories.
 
-    First-run behaviour
-    -------------------
-    If a real GitHub token is configured AND the catalog has not been done yet,
-    the full git-tree catalog scan runs first (indexes every rule file in the
-    repo).  This takes a few minutes but gives complete coverage.
+    For each repo:
+      - status='pending'       → clone then full index
+      - status='ready'/'error' → git fetch + diff (incremental sync)
+      - status='cloning'/'indexing' → skip (already in progress)
 
-    Without a valid token on the first run, a 30-day incremental window is
-    used instead, with a warning printed to stderr.
+    The GitHub REST API is called only for releases metadata (2 requests/scan,
+    fine even without a token).
 
-    Subsequent runs always use a 2-hour incremental window.
-
-    GitHub token is read from the database (set via the admin panel).
-    Discord notifications are sent to every user with a webhook configured.
-
-    triggered_by : free-text label recorded in the activity log.
-    Returns a summary dict: {new, modified, skipped, error}.
+    Thread-safe: returns {"skipped": True} if a scan is already running.
+    triggered_by : free-text label for the activity log.
     """
     if not _scan_lock.acquire(blocking=False):
         print("  Scan already in progress — skipping.", flush=True)
@@ -649,8 +737,8 @@ def run_scan(triggered_by: str = "scheduler") -> dict:
 
     try:
         db.set_scanning(True)
-
-        token = db.get_app_config("github_token")
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        print(f"[{timestamp}] Scan started (triggered by: {triggered_by})", flush=True)
 
         if not YAML_AVAILABLE:
             print(
@@ -665,113 +753,92 @@ def run_scan(triggered_by: str = "scheduler") -> dict:
                 flush=True,
             )
 
-        timestamp    = datetime.now().strftime("%Y-%m-%d %H:%M")
-        catalog_done = db.is_catalog_done()
-        status       = db.get_scan_status()
-        has_token    = _is_real_token(token)
+        repos = db.get_active_repos()
+        if not repos:
+            print("  No active repos configured — nothing to scan.", flush=True)
+            db.finish_scan(0, 0)
+            return {"new": 0, "modified": 0, "skipped": False}
 
-        # ── Catalog scan (runs once when a real token is available) ──────────
-        catalog_new = 0
-        if not catalog_done and has_token:
-            print(
-                f"[{timestamp}] Running full catalog scan (first time with token)…",
-                flush=True,
-            )
-            db.log_activity("scan", "Full catalog scan started",
-                            actor=triggered_by,
-                            detail="Indexing all rules from both repos")
-            cs_new = catalog_scan_sigma(token)
-            cp_new = catalog_scan_splunk(token)
-            catalog_new = cs_new + cp_new
-            db.mark_catalog_done()
-            db.log_activity(
-                "scan",
-                f"Catalog scan complete — {catalog_new} rules indexed",
-                actor=triggered_by,
-                detail=f"sigma: {cs_new} | splunk: {cp_new}",
-            )
-            print(f"  Catalog complete — {catalog_new} rules indexed.", flush=True)
+        total_new, total_mod = 0, 0
+        repo_summary: list[str] = []
 
-        elif not catalog_done and not has_token:
-            print(
-                "  WARNING: No GitHub token — catalog scan skipped. "
-                "Add a token in the Admin panel for complete rule coverage.",
-                file=sys.stderr,
-            )
+        for repo_cfg in repos:
+            name   = repo_cfg["name"]
+            status = repo_cfg["status"]
 
-        # ── Incremental scan ─────────────────────────────────────────────────
-        # After a catalog the window is short (2 h) so we pick up anything
-        # committed since the catalog started.  Without a catalog on the first
-        # run we fall back to 30 days.
-        if catalog_done or status.get("last_scan"):
-            hours = 2
-        elif not catalog_done and not has_token:
-            hours = 720  # 30-day seed when no token available
-            print("  First run — using 30-day window for initial database seed.", flush=True)
-        else:
-            hours = 2  # catalog was just done above
+            try:
+                if status == "pending":
+                    if clone_repo(repo_cfg):
+                        # Reload config so local_path is current
+                        fresh = db.get_repo_by_name(name)
+                        if fresh:
+                            added = index_repo(fresh)
+                            repo_summary.append(f"{name}: initial index of {added} rules")
+                            total_new += added
+                        else:
+                            repo_summary.append(f"{name}: clone OK but reload failed")
+                    else:
+                        repo_summary.append(f"{name}: clone FAILED")
 
-        since_dt  = datetime.now(timezone.utc) - timedelta(hours=hours)
-        since_iso = since_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+                elif status in ("ready", "error"):
+                    n, m = sync_repo(repo_cfg)
+                    repo_summary.append(f"{name}: {n} new / {m} modified")
+                    total_new += n
+                    total_mod += m
 
-        print(f"[{timestamp}] Incremental scan (window: {hours}h, since {since_iso})", flush=True)
+                elif status in ("cloning", "indexing"):
+                    print(f"  [{name}] Already {status} — skipping", flush=True)
+                    repo_summary.append(f"{name}: {status} (skipped)")
 
-        db.log_activity("scan", f"Incremental scan started (window: {hours}h)",
-                        actor=triggered_by,
-                        detail=f"since={since_iso}")
+            except Exception as e:
+                msg = str(e)
+                print(f"  [{name}] Unexpected error: {msg}", file=sys.stderr)
+                db.update_repo_status(name, "error", msg[:300])
+                db.log_activity("scan", f"Error processing {name}",
+                                actor=triggered_by, detail=msg, level="error")
+                repo_summary.append(f"{name}: ERROR — {msg[:80]}")
 
-        s_new, s_mod = scan_sigma(since_iso, token)
-        p_new, p_mod = scan_splunk(since_iso, token)
-
-        total_new = s_new + p_new
-        total_mod = s_mod + p_mod
-
-        # Persist new releases
-        for r in releases_since(SIGMA_REPO["owner"], SIGMA_REPO["repo"], since_dt, token):
-            db.upsert_release(
-                "sigma", r["tag_name"], r.get("name", ""),
-                (r.get("body") or "")[:1000], r.get("published_at", ""), r.get("html_url", ""),
-            )
-        for r in releases_since(SPLUNK_REPO["owner"], SPLUNK_REPO["repo"], since_dt, token):
-            db.upsert_release(
-                "splunk", r["tag_name"], r.get("name", ""),
-                (r.get("body") or "")[:1000], r.get("published_at", ""), r.get("html_url", ""),
-            )
+        # Fetch GitHub releases for each active repo (low-rate REST call)
+        token     = db.get_app_config("github_token")
+        since_dt  = datetime.now(timezone.utc) - timedelta(hours=2)
+        for repo_cfg in repos:
+            try:
+                for rel in releases_since(
+                    repo_cfg["owner"], repo_cfg["repo"], since_dt, token
+                ):
+                    db.upsert_release(
+                        repo_cfg["name"],
+                        rel["tag_name"],
+                        rel.get("name", ""),
+                        (rel.get("body") or "")[:1000],
+                        rel.get("published_at", ""),
+                        rel.get("html_url", ""),
+                    )
+            except Exception as e:
+                print(f"  [{repo_cfg['name']}] Releases fetch error: {e}", file=sys.stderr)
 
         db.finish_scan(total_new, total_mod)
 
-        print(
-            f"  sigma  → new={s_new}  mod={s_mod}\n"
-            f"  splunk → new={p_new}  mod={p_mod}",
-            flush=True,
-        )
+        summary_str = " | ".join(repo_summary)
+        print(f"  Summary: {summary_str}", flush=True)
+        print("Done.", flush=True)
 
         db.log_activity(
             "scan",
             f"Scan complete — {total_new} new, {total_mod} modified",
             actor=triggered_by,
-            detail=(
-                f"sigma: {s_new} new / {s_mod} modified | "
-                f"splunk: {p_new} new / {p_mod} modified"
-                + (f" | catalog: {catalog_new} indexed" if catalog_new else "")
-            ),
+            detail=summary_str,
         )
 
-        # Send Discord notifications to every user who has a webhook configured
-        if total_new + total_mod + catalog_new > 0:
+        # Discord notifications (only when there is something to report)
+        if total_new + total_mod > 0:
             msg_parts = [f"**RuleRadar — {timestamp}**"]
-            if catalog_new:
-                msg_parts.append(f"📚 Full catalog: **{catalog_new}** rules indexed")
-            msg_parts += [
-                f"Sigma: **{s_new}** new / **{s_mod}** modified",
-                f"Splunk: **{p_new}** new / **{p_mod}** modified",
-                "View full details in your RuleRadar instance.",
-            ]
+            for line in repo_summary:
+                msg_parts.append(f"• {line}")
             msg = "\n".join(msg_parts)
             for webhook_url in db.get_all_user_webhooks():
                 send_discord(webhook_url, msg)
 
-        print("Done.", flush=True)
         return {"new": total_new, "modified": total_mod, "skipped": False}
 
     except Exception as e:

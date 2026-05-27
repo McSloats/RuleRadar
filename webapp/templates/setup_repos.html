@@ -1,0 +1,257 @@
+{% extends "layout.html" %}
+{% block title %}Repository Setup — RuleRadar{% endblock %}
+
+{% block content %}
+<div class="repos-gate-wrap">
+  <div class="repos-gate-card">
+
+    {# ── Header ────────────────────────────────────────────────────────────── #}
+    <div class="repos-gate-header">
+      <span class="repos-gate-icon">📦</span>
+      <div>
+        <h1>Repository Setup Required</h1>
+        <p class="subtitle">
+          Select the detection repositories to monitor. RuleRadar will clone them
+          locally — no API rate limits apply.
+        </p>
+      </div>
+    </div>
+
+    {% if not current_user.is_admin %}
+
+    {# ── Non-admin waiting screen ──────────────────────────────────────────── #}
+    <div class="info-box info-box-wait">
+      <strong>⏳ Waiting for administrator setup</strong><br>
+      RuleRadar has not yet been configured with any detection repositories.
+      Please ask your administrator to log in and complete the setup.
+    </div>
+
+    {% else %}
+
+    {# ── How it works ──────────────────────────────────────────────────────── #}
+    <div class="info-box">
+      <strong>How it works</strong><br>
+      RuleRadar uses <code>git clone</code> to download each repository locally.
+      Rules are read from disk — there are no API rate limits and no GitHub token
+      is required.  After the initial clone, only changed files are fetched on
+      each bi-hourly scan.
+    </div>
+
+    {# ── Repo selection ────────────────────────────────────────────────────── #}
+    <form id="setup-form" method="post" action="{{ url_for('setup_repos_submit') }}">
+
+      <p class="section-label">Choose repositories to monitor:</p>
+
+      <div class="repo-cards">
+        {% for repo in available %}
+        <label class="repo-card" for="repo-{{ repo.name }}">
+          <div class="repo-card-check">
+            <input type="checkbox" id="repo-{{ repo.name }}"
+                   name="repos" value="{{ repo.name }}" checked>
+          </div>
+          <div class="repo-card-body">
+            <p class="repo-card-title">{{ repo.display_name }}</p>
+            <p class="repo-card-desc">{{ repo.description }}</p>
+            <p class="repo-card-meta">
+              <span class="repo-meta-tag">{{ repo.owner }}/{{ repo.repo }}</span>
+              <span class="repo-meta-tag">branch: {{ repo.branch }}</span>
+              <span class="repo-size-tag" id="size-{{ repo.name }}">
+                <span class="size-loading">fetching size…</span>
+              </span>
+            </p>
+          </div>
+        </label>
+        {% endfor %}
+      </div>
+
+      <div class="confirm-note">
+        <p>
+          Cloning runs in the background and may take <strong>2–5 minutes</strong>
+          depending on your connection.  You can browse the (empty) site while
+          indexing runs — rules will appear automatically as each repo finishes.
+        </p>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-full"
+              style="font-size:0.95rem; padding:0.65rem 1rem; margin-top:0.5rem;">
+        ✓ Enable Selected Repos &amp; Start Download
+      </button>
+
+    </form>
+
+    {% endif %}
+
+  </div>
+</div>
+
+<script>
+// ── Fetch size estimates via AJAX ──────────────────────────────────────────────
+(async function loadSizes() {
+  try {
+    const res  = await fetch('{{ url_for("api_repo_sizes") }}');
+    const data = await res.json();
+    for (const [name, info] of Object.entries(data)) {
+      const el = document.getElementById('size-' + name);
+      if (!el) continue;
+      if (info.ok && info.size_mb !== null) {
+        el.innerHTML = `<span class="repo-meta-tag">~${info.size_mb} MB download</span>`;
+      } else {
+        el.innerHTML = '<span class="repo-meta-tag text-muted">size unknown</span>';
+      }
+    }
+  } catch(e) {
+    document.querySelectorAll('.size-loading').forEach(el => {
+      el.textContent = 'size unknown';
+    });
+  }
+})();
+</script>
+
+<style>
+/* ── Gate layout ───────────────────────────────────────────────────────── */
+.repos-gate-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 2rem 1rem;
+}
+.repos-gate-card {
+  width: 100%;
+  max-width: 740px;
+  background: #160f2a;
+  border: 1px solid #2b1e4a;
+  border-radius: 10px;
+  padding: 2rem;
+}
+.repos-gate-header {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
+}
+.repos-gate-icon {
+  font-size: 2rem;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+.repos-gate-header h1 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #d4a017;
+  margin-bottom: 0.25rem;
+}
+.repos-gate-header .subtitle {
+  font-size: 0.875rem;
+  color: #6a5888;
+}
+
+/* ── Info box ──────────────────────────────────────────────────────────── */
+.info-box {
+  background: #0a0716;
+  border: 1px solid #3d2d63;
+  border-left: 3px solid #d4a017;
+  border-radius: 6px;
+  padding: 0.85rem 1rem;
+  font-size: 0.875rem;
+  color: #9080b8;
+  line-height: 1.6;
+  margin-bottom: 1.5rem;
+}
+.info-box strong { color: #ede8f5; }
+.info-box code {
+  background: #1e1040;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.78rem;
+  color: #c4b5fd;
+}
+.info-box-wait {
+  border-left-color: #6a5888;
+  color: #9080b8;
+}
+
+/* ── Section label ─────────────────────────────────────────────────────── */
+.section-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #ede8f5;
+  margin-bottom: 0.85rem;
+}
+
+/* ── Repo selection cards ──────────────────────────────────────────────── */
+.repo-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+.repo-card {
+  display: flex;
+  gap: 0.85rem;
+  align-items: flex-start;
+  background: #0a0716;
+  border: 1px solid #2b1e4a;
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.repo-card:hover { border-color: #d4a017; }
+.repo-card input[type="checkbox"] {
+  margin-top: 0.15rem;
+  flex-shrink: 0;
+  width: 1rem;
+  height: 1rem;
+  accent-color: #d4a017;
+  cursor: pointer;
+}
+.repo-card-body { flex: 1; }
+.repo-card-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #ede8f5;
+  margin-bottom: 0.2rem;
+}
+.repo-card-desc {
+  font-size: 0.83rem;
+  color: #9080b8;
+  margin-bottom: 0.5rem;
+  line-height: 1.5;
+}
+.repo-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0;
+}
+.repo-meta-tag {
+  background: #1e1040;
+  color: #c4b5fd;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-family: monospace;
+}
+.repo-size-tag {
+  font-size: 0.75rem;
+}
+.size-loading {
+  color: #6a5888;
+  font-style: italic;
+  font-size: 0.75rem;
+}
+
+/* ── Confirm note ──────────────────────────────────────────────────────── */
+.confirm-note {
+  background: #0a0716;
+  border: 1px solid #2b1e4a;
+  border-radius: 6px;
+  padding: 0.85rem 1rem;
+  font-size: 0.83rem;
+  color: #9080b8;
+  line-height: 1.6;
+  margin-bottom: 1rem;
+}
+.confirm-note strong { color: #ede8f5; }
+</style>
+{% endblock %}

@@ -9,19 +9,185 @@
   </a>
 </div>
 
+{# ═══ Monitored Repositories ══════════════════════════════════════════════════ #}
+<div class="card">
+  <div class="card-title">📦 Monitored Repositories</div>
+  <p class="text-muted text-small" style="margin-bottom:1rem;">
+    Repositories are cloned locally with <code style="background:#0a0716; padding:0.1rem 0.3rem; border-radius:3px; font-size:0.78rem; color:#c4b5fd;">git clone</code>
+    and kept up to date via <code style="background:#0a0716; padding:0.1rem 0.3rem; border-radius:3px; font-size:0.78rem; color:#c4b5fd;">git fetch</code>
+    every two hours.  No API rate limits apply.
+  </p>
+
+  {% if repos %}
+  <div class="table-wrap" style="margin-bottom:1.5rem;">
+    <table class="static-table">
+      <thead>
+        <tr>
+          <th>Repository</th>
+          <th style="width:90px;">Status</th>
+          <th style="width:80px;">Parser</th>
+          <th style="width:160px;">Last Synced</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for repo in repos %}
+        <tr>
+          <td>
+            <strong>{{ repo.display_name }}</strong>
+            <span class="text-muted text-small" style="display:block; margin-top:0.15rem;">
+              {{ repo.owner }}/{{ repo.repo }}
+              · branch: <code style="font-size:0.78rem;">{{ repo.branch }}</code>
+            </span>
+            {% if repo.error_msg %}
+            <span class="text-danger text-small" style="display:block; margin-top:0.2rem;">
+              ⚠ {{ repo.error_msg[:120] }}
+            </span>
+            {% endif %}
+          </td>
+          <td>
+            <span class="badge badge-repo-{{ repo.status }}">{{ repo.status }}</span>
+            {% if not repo.enabled %}
+              <span class="text-muted text-small" style="display:block;">disabled</span>
+            {% endif %}
+          </td>
+          <td class="text-muted text-small">{{ repo.parser }}</td>
+          <td class="text-muted text-small nowrap">
+            {% if repo.last_synced_at %}
+              {{ repo.last_synced_at[:16].replace('T',' ') }} UTC
+            {% else %}
+              —
+            {% endif %}
+          </td>
+          <td>
+            <div class="gap-1">
+
+              {# Enable / Disable #}
+              <form method="post"
+                    action="{{ url_for('admin_repos_toggle', name=repo.name) }}"
+                    style="display:inline;">
+                <button type="submit" class="btn btn-secondary btn-sm">
+                  {{ 'Enable' if not repo.enabled else 'Disable' }}
+                </button>
+              </form>
+
+              {# Remove (with confirm) #}
+              <details class="inline-action">
+                <summary class="btn btn-danger btn-sm" style="cursor:pointer;">Remove</summary>
+                <div class="detail-body">
+                  <p class="text-small" style="margin-bottom:0.5rem; color:#fc8181;">
+                    Remove <strong>{{ repo.display_name }}</strong> from monitoring?
+                  </p>
+                  <form method="post"
+                        action="{{ url_for('admin_repos_remove', name=repo.name) }}">
+                    <div style="margin-bottom:0.5rem; display:flex; align-items:center; gap:0.5rem;">
+                      <input type="checkbox" name="delete_data" value="1"
+                             id="del-data-{{ repo.name }}" style="width:auto; cursor:pointer;">
+                      <label for="del-data-{{ repo.name }}"
+                             style="margin:0; font-size:0.82rem; color:#e2e8f0; cursor:pointer;">
+                        Also delete all detections &amp; update history for this repo
+                      </label>
+                    </div>
+                    <button type="submit" class="btn btn-danger btn-sm">Confirm Remove</button>
+                  </form>
+                </div>
+              </details>
+
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-muted text-small" style="margin-bottom:1rem;">
+    No repositories configured yet.
+  </p>
+  {% endif %}
+
+  {# ── Add a pre-defined or custom repository ──────────────────────────────── #}
+  <hr class="divider">
+  <p style="font-size:0.85rem; font-weight:600; margin-bottom:0.75rem;">Add Repository</p>
+
+  {% if unconfigured %}
+  <p class="text-small text-muted" style="margin-bottom:0.75rem;">
+    Quick-add a pre-defined repository:
+  </p>
+  <div style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-bottom:1.25rem;">
+    {% for cfg in unconfigured %}
+    <form method="post" action="{{ url_for('admin_repos_add') }}" style="display:inline;">
+      <input type="hidden" name="name" value="{{ cfg.name }}">
+      <button type="submit" class="btn btn-secondary btn-sm">
+        + {{ cfg.display_name }}
+      </button>
+    </form>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <details class="inline-action" style="display:block;">
+    <summary style="cursor:pointer; font-size:0.83rem; color:#d4a017; margin-bottom:0.5rem;">
+      + Add custom repository…
+    </summary>
+    <div class="detail-body" style="max-width:580px;">
+      <form method="post" action="{{ url_for('admin_repos_add') }}">
+        <div class="form-group">
+          <label>Identifier <span class="text-muted">(unique short name, e.g. my_rules)</span></label>
+          <input type="text" name="name" class="wide" required placeholder="my_rules">
+        </div>
+        <div class="form-row" style="margin-bottom:0.75rem;">
+          <div style="flex:1; min-width:160px;">
+            <label style="display:block; font-size:0.8rem; color:#a0aec0; margin-bottom:0.3rem;">Display Name</label>
+            <input type="text" name="display_name" class="wide" placeholder="My Custom Rules">
+          </div>
+          <div style="flex:1; min-width:120px;">
+            <label style="display:block; font-size:0.8rem; color:#a0aec0; margin-bottom:0.3rem;">GitHub Owner</label>
+            <input type="text" name="owner" class="wide" placeholder="owner" required>
+          </div>
+          <div style="flex:1; min-width:120px;">
+            <label style="display:block; font-size:0.8rem; color:#a0aec0; margin-bottom:0.3rem;">Repo Name</label>
+            <input type="text" name="repo" class="wide" placeholder="repo-name" required>
+          </div>
+        </div>
+        <div class="form-row" style="margin-bottom:0.75rem;">
+          <div style="flex:1; min-width:100px;">
+            <label style="display:block; font-size:0.8rem; color:#a0aec0; margin-bottom:0.3rem;">Branch</label>
+            <input type="text" name="branch" class="wide" placeholder="main" value="main">
+          </div>
+          <div style="flex:2; min-width:180px;">
+            <label style="display:block; font-size:0.8rem; color:#a0aec0; margin-bottom:0.3rem;">
+              Paths <span class="text-muted">(comma-separated, e.g. rules/, detections/)</span>
+            </label>
+            <input type="text" name="paths" class="wide" placeholder="rules/, detections/">
+          </div>
+          <div style="flex:1; min-width:100px;">
+            <label style="display:block; font-size:0.8rem; color:#a0aec0; margin-bottom:0.3rem;">Parser</label>
+            <select name="parser" class="wide">
+              <option value="sigma">Sigma</option>
+              <option value="splunk">Splunk</option>
+            </select>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">Add &amp; Start Clone</button>
+      </form>
+    </div>
+  </details>
+</div>
+
 {# ═══ GitHub Configuration ═════════════════════════════════════════════════════ #}
 <div class="card">
   <div class="card-title">⚙️ GitHub Configuration</div>
   <p class="text-muted text-small" style="margin-bottom:1rem;">
-    A GitHub personal access token raises the API rate limit from 60 to 5,000 requests/hour.
-    Both monitored repos are public, so this is optional — leave blank to scan unauthenticated.
-    Required scope: <code style="background:#0f1117; padding:0.1rem 0.3rem; border-radius:3px; font-size:0.78rem;">public_repo</code>
-    (classic token) or <code style="background:#0f1117; padding:0.1rem 0.3rem; border-radius:3px; font-size:0.78rem;">Contents: Read</code>
-    (fine-grained token).
+    A GitHub token is <strong>optional</strong> — repositories are cloned directly via git
+    and do not require API access.  A token is only used to fetch
+    <strong>releases metadata</strong> (2 API calls per scan), which works fine at the
+    unauthenticated limit of 60 req/hr.  Add a token here only if you are hitting that
+    limit for releases, or want faster size estimates on the setup page.
   </p>
   <form method="post" action="{{ url_for('admin_config') }}" style="max-width:560px;">
     <div class="form-group">
-      <label>GitHub Token</label>
+      <label>GitHub Token <span class="text-muted">(optional)</span></label>
       <div style="display:flex; gap:0.5rem; align-items:center;">
         <input type="password" id="gh-token-input" name="github_token"
                class="wide" value="{{ github_token }}"
@@ -33,7 +199,7 @@
       {% if token_display %}
       <p class="hint text-success">✓ Token set: {{ token_display }}</p>
       {% else %}
-      <p class="hint text-muted">No token — unauthenticated (60 req/hour)</p>
+      <p class="hint text-muted">No token — using unauthenticated API for releases (60 req/hr)</p>
       {% endif %}
     </div>
     <button type="submit" class="btn btn-primary">Save Token</button>
@@ -44,7 +210,6 @@
 <div class="card">
   <div class="card-title">👥 Users</div>
 
-  {# Users table #}
   <div class="table-wrap" style="margin-bottom:1.5rem;">
     <table class="static-table">
       <thead>
@@ -83,7 +248,6 @@
           <td>
             <div class="gap-1">
 
-              {# Toggle admin #}
               {% if user.id != current_user_id %}
               <form method="post"
                     action="{{ url_for('admin_toggle_admin', user_id=user.id) }}"
@@ -95,7 +259,6 @@
               </form>
               {% endif %}
 
-              {# Reset password (inline expand) #}
               <details class="inline-action">
                 <summary>Reset password</summary>
                 <div class="detail-body">
@@ -118,7 +281,6 @@
                 </div>
               </details>
 
-              {# Delete user #}
               {% if user.id != current_user_id %}
               <form method="post"
                     action="{{ url_for('admin_delete_user', user_id=user.id) }}"
@@ -136,7 +298,6 @@
     </table>
   </div>
 
-  {# Add user form #}
   <hr class="divider">
   <p style="font-size:0.85rem; font-weight:600; margin-bottom:0.75rem;">Add New User</p>
   <form method="post" action="{{ url_for('admin_add_user') }}" style="max-width:460px;">
@@ -178,4 +339,14 @@ function toggleTokenVisibility() {
   }
 }
 </script>
+
+<style>
+/* ── Repo status badges ─────────────────────────────────────────────────── */
+.badge-repo-pending   { background: #2b1e4a; color: #c4b5fd; }
+.badge-repo-cloning   { background: #1a3366; color: #90cdf4; }
+.badge-repo-indexing  { background: #1a3366; color: #90cdf4; }
+.badge-repo-ready     { background: #14301f; color: #6ee7b7; border: 1px solid #1a5c38; }
+.badge-repo-error     { background: #3b1818; color: #fc8181; border: 1px solid #7c1d1d; }
+.badge-repo-inactive  { background: #1a1a2e; color: #6a5888; }
+</style>
 {% endblock %}

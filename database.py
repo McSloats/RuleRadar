@@ -35,13 +35,34 @@ CREATE TABLE IF NOT EXISTS user_settings (
     saved_filters   TEXT    NOT NULL DEFAULT '[]'
 );
 
--- ── App-level configuration (replaces config.json) ────────────────────────────
+-- ── App-level configuration ───────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS app_config (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
 );
 
 INSERT OR IGNORE INTO app_config (key, value) VALUES ('github_token', '');
+
+-- ── Monitored repositories ────────────────────────────────────────────────────
+-- Each row represents one GitHub repository being cloned and scanned.
+-- status: 'pending' | 'cloning' | 'indexing' | 'ready' | 'error' | 'inactive'
+CREATE TABLE IF NOT EXISTS repos (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    name           TEXT    NOT NULL UNIQUE,   -- short identifier, e.g. 'sigma'
+    display_name   TEXT    NOT NULL DEFAULT '',
+    owner          TEXT    NOT NULL DEFAULT '',
+    repo           TEXT    NOT NULL DEFAULT '',
+    branch         TEXT    NOT NULL DEFAULT '',
+    paths          TEXT    NOT NULL DEFAULT '[]',   -- JSON array of sub-paths to scan
+    parser         TEXT    NOT NULL DEFAULT '',     -- 'sigma' | 'splunk'
+    local_path     TEXT    NOT NULL DEFAULT '',     -- absolute path on disk
+    last_sha       TEXT    NOT NULL DEFAULT '',     -- HEAD SHA of last indexed commit
+    status         TEXT    NOT NULL DEFAULT 'pending',
+    error_msg      TEXT    NOT NULL DEFAULT '',
+    enabled        INTEGER NOT NULL DEFAULT 1,
+    added_at       TEXT    NOT NULL DEFAULT '',
+    last_synced_at TEXT    NOT NULL DEFAULT ''
+);
 
 -- ── Detection rules (current state of every known rule) ───────────────────────
 CREATE TABLE IF NOT EXISTS detections (
@@ -69,13 +90,13 @@ CREATE INDEX IF NOT EXISTS idx_det_source       ON detections(source);
 CREATE INDEX IF NOT EXISTS idx_det_last_updated ON detections(last_updated DESC);
 CREATE INDEX IF NOT EXISTS idx_det_mitre        ON detections(mitre_techniques);
 
--- ── Change log (every new/modified event is appended here) ────────────────────
+-- ── Change log (every new/modified/deleted event is appended here) ────────────
 CREATE TABLE IF NOT EXISTS updates (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     source          TEXT    NOT NULL,
     file_path       TEXT    NOT NULL,
     title           TEXT    NOT NULL DEFAULT '',
-    change_type     TEXT    NOT NULL,   -- 'new' | 'modified'
+    change_type     TEXT    NOT NULL,   -- 'new' | 'modified' | 'deleted' | 'renamed'
     detection_logic TEXT    NOT NULL DEFAULT '',
     spl             TEXT    NOT NULL DEFAULT '',
     rule_url        TEXT    NOT NULL DEFAULT '',
@@ -118,8 +139,7 @@ CREATE TABLE IF NOT EXISTS scan_status (
     last_scan    TEXT,
     new_count    INTEGER NOT NULL DEFAULT 0,
     mod_count    INTEGER NOT NULL DEFAULT 0,
-    is_scanning  INTEGER NOT NULL DEFAULT 0,
-    catalog_done INTEGER NOT NULL DEFAULT 0
+    is_scanning  INTEGER NOT NULL DEFAULT 0
 );
 
 INSERT OR IGNORE INTO scan_status (id) VALUES (1);
@@ -160,7 +180,7 @@ def _migrate_schema(conn: sqlite3.Connection):
         "ALTER TABLE detections ADD COLUMN severity         TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE detections ADD COLUMN rule_date        TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE detections ADD COLUMN refs             TEXT NOT NULL DEFAULT ''",
-        # v4: catalog scan tracking
+        # v4: catalog scan tracking (column kept for upgrade compatibility, no longer written)
         "ALTER TABLE scan_status ADD COLUMN catalog_done INTEGER NOT NULL DEFAULT 0",
     ]
     for sql in migrations:
@@ -175,7 +195,7 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-# ── App-level config (replaces config.json) ────────────────────────────────────
+# ── App-level config ───────────────────────────────────────────────────────────
 
 def get_app_config(key: str, default: str = "") -> str:
     with get_conn() as conn:
@@ -314,6 +334,126 @@ def get_all_user_webhooks() -> list[str]:
         return [r["discord_webhook"] for r in rows]
 
 
+# ── Repository helpers ─────────────────────────────────────────────────────────
+
+def get_all_repos() -> list[dict]:
+    """Return all repos ordered by name."""
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM repos ORDER BY name").fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_repo_by_name(name: str) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM repos WHERE name = ?", (name,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_active_repos() -> list[dict]:
+    """
+    Return repos that are enabled and not inactive.
+    These are the repos the scanner should process.
+    """
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM repos WHERE enabled = 1 AND status != 'inactive' ORDER BY name"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def any_repos_configured() -> bool:
+    """
+    Return True if at least one repo has been enabled by an admin.
+    Used by the repo gate in before_request to decide whether to show setup-repos.
+    """
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM repos WHERE enabled = 1"
+        ).fetchone()
+        return row[0] > 0
+
+
+def add_repo(
+    name: str,
+    display_name: str,
+    owner: str,
+    repo: str,
+    branch: str,
+    paths_json: str,
+    parser: str,
+    local_path: str,
+) -> int:
+    """
+    Register a new repository for monitoring.
+    Status starts as 'pending' — the scanner will clone it on the next run.
+    Returns the new row id.
+    """
+    with get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO repos
+               (name, display_name, owner, repo, branch, paths, parser,
+                local_path, status, enabled, added_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 1, ?)
+               ON CONFLICT(name) DO UPDATE SET
+                 display_name = excluded.display_name,
+                 owner        = excluded.owner,
+                 repo         = excluded.repo,
+                 branch       = excluded.branch,
+                 paths        = excluded.paths,
+                 parser       = excluded.parser,
+                 local_path   = excluded.local_path,
+                 status       = 'pending',
+                 enabled      = 1,
+                 error_msg    = ''
+            """,
+            (name, display_name, owner, repo, branch, paths_json, parser,
+             local_path, now_iso()),
+        )
+        return cur.lastrowid
+
+
+def update_repo_status(name: str, status: str, error_msg: str = ""):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE repos SET status = ?, error_msg = ? WHERE name = ?",
+            (status, error_msg, name),
+        )
+
+
+def update_repo_sha(name: str, sha: str):
+    """Record the latest indexed commit SHA and update last_synced_at."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE repos SET last_sha = ?, last_synced_at = ? WHERE name = ?",
+            (sha, now_iso(), name),
+        )
+
+
+def update_repo_local_path(name: str, local_path: str):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE repos SET local_path = ? WHERE name = ?",
+            (local_path, name),
+        )
+
+
+def set_repo_enabled(name: str, enabled: bool):
+    """Enable or disable a repo.  Disabled repos are skipped by the scanner."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE repos SET enabled = ? WHERE name = ?",
+            (1 if enabled else 0, name),
+        )
+
+
+def remove_repo(name: str):
+    """Remove a repo from tracking. Does NOT delete the local clone or its detections."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM repos WHERE name = ?", (name,))
+
+
 # ── Detection helpers ──────────────────────────────────────────────────────────
 
 def upsert_detection(
@@ -338,7 +478,7 @@ def upsert_detection(
     Returns True if the row was brand-new (first time we've seen this file).
 
     Extra metadata fields (MITRE, author, etc.) are keyword-only to make
-    call sites explicit. Existing callers that omit them get empty defaults.
+    call sites explicit.
     """
     ts = now_iso()
     with get_conn() as conn:
@@ -377,6 +517,15 @@ def upsert_detection(
             ),
         )
         return True
+
+
+def delete_detection(source: str, file_path: str):
+    """Remove a detection that was deleted from the repository."""
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM detections WHERE source = ? AND file_path = ?",
+            (source, file_path),
+        )
 
 
 def search_detections(
@@ -423,15 +572,6 @@ def search_detections(
         ).fetchall()
 
     return [dict(r) for r in rows], total
-
-
-def get_existing_detection_paths(source: str) -> set[str]:
-    """Return the set of file_path values already stored for a given source."""
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT file_path FROM detections WHERE source = ?", (source,)
-        ).fetchall()
-        return {r["file_path"] for r in rows}
 
 
 # ── Update helpers ─────────────────────────────────────────────────────────────
@@ -516,23 +656,6 @@ def finish_scan(new_count: int, mod_count: int):
                SET last_scan=?, new_count=?, mod_count=?, is_scanning=0
                WHERE id=1""",
             (now_iso(), new_count, mod_count),
-        )
-
-
-def is_catalog_done() -> bool:
-    """Return True if the full catalog scan has been completed at least once."""
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT catalog_done FROM scan_status WHERE id = 1"
-        ).fetchone()
-        return bool(row["catalog_done"]) if row else False
-
-
-def mark_catalog_done():
-    """Record that the full catalog scan has been completed."""
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE scan_status SET catalog_done = 1 WHERE id = 1"
         )
 
 

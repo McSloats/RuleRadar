@@ -6,33 +6,11 @@
   <h2>Settings</h2>
 </div>
 
-{# ═══ API & Scan Status ════════════════════════════════════════════════════════ #}
+{# ═══ Repositories & Scan Status ══════════════════════════════════════════════ #}
 <div class="card">
-  <div class="card-title">📡 GitHub API &amp; Scan Schedule</div>
+  <div class="card-title">📡 Repositories &amp; Scan Schedule</div>
 
   <div class="scan-status-grid">
-
-    {# Token status #}
-    <div class="scan-stat-cell">
-      <p class="scan-stat-label">GitHub Token</p>
-      {% if token_is_set %}
-        <p class="scan-stat-value" style="font-family:monospace; font-size:0.82rem;
-           letter-spacing:0.03em; color:#68d391;">
-          {{ token_display }}
-        </p>
-        <p class="text-muted text-small" style="margin-top:0.25rem;">
-          ✓ Token active — 5,000 req/hr
-          {% if current_user.is_admin %}
-            · <a href="{{ url_for('admin') }}">Change in Admin panel</a>
-          {% endif %}
-        </p>
-      {% else %}
-        <p class="scan-stat-value text-danger">Not configured</p>
-        <p class="text-small" style="margin-top:0.25rem;">
-          <a href="{{ url_for('setup_token') }}">Set up your GitHub token →</a>
-        </p>
-      {% endif %}
-    </div>
 
     {# Last scan #}
     <div class="scan-stat-cell">
@@ -49,8 +27,74 @@
       </p>
     </div>
 
+    {# GitHub token (optional) #}
+    <div class="scan-stat-cell">
+      <p class="scan-stat-label">GitHub Token <span class="text-muted">(optional)</span></p>
+      {% if token_is_set %}
+        <p class="scan-stat-value" style="font-family:monospace; font-size:0.82rem;
+           letter-spacing:0.03em; color:#68d391;">
+          {{ token_display }}
+        </p>
+        <p class="text-muted text-small" style="margin-top:0.25rem;">
+          ✓ Token set — used for releases API only
+          {% if current_user.is_admin %}
+            · <a href="{{ url_for('admin') }}">Change in Admin panel</a>
+          {% endif %}
+        </p>
+      {% else %}
+        <p class="scan-stat-value text-muted" style="font-size:0.85rem;">Not set (unauthenticated)</p>
+        <p class="text-small text-muted" style="margin-top:0.25rem;">
+          Repos are cloned via git — no token required.
+          {% if current_user.is_admin %}
+            <a href="{{ url_for('admin') }}">Optionally set one in Admin →</a>
+          {% endif %}
+        </p>
+      {% endif %}
+    </div>
+
   </div>
+
+  {# Per-repo status #}
+  {% if repos %}
+  <hr class="divider" style="margin-top:0.25rem;">
+  <p style="font-size:0.8rem; font-weight:600; color:#a0aec0; margin-bottom:0.6rem;">
+    Monitored Repositories
+  </p>
+  <div style="display:flex; flex-wrap:wrap; gap:0.5rem;">
+    {% for repo in repos %}
+    <div class="repo-status-chip repo-chip-{{ repo.status }}">
+      <span class="repo-chip-name">{{ repo.display_name }}</span>
+      <span class="repo-chip-status">{{ repo.status }}</span>
+      {% if repo.last_synced_at %}
+        <span class="repo-chip-time">
+          synced {{ repo.last_synced_at[:10] }}
+        </span>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
 </div>
+
+<style>
+.repo-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: #0a0716;
+  border: 1px solid #2b1e4a;
+  border-radius: 6px;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.78rem;
+}
+.repo-chip-name   { color: #ede8f5; font-weight: 600; }
+.repo-chip-status { color: #6a5888; }
+.repo-chip-time   { color: #6a5888; font-style: italic; }
+.repo-chip-ready   .repo-chip-status { color: #6ee7b7; }
+.repo-chip-cloning .repo-chip-status,
+.repo-chip-indexing .repo-chip-status { color: #90cdf4; }
+.repo-chip-error   .repo-chip-status { color: #fc8181; }
+</style>
 
 {# ═══ Change Password ══════════════════════════════════════════════════════════ #}
 <div class="card">

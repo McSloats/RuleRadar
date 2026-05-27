@@ -6,11 +6,12 @@ Design notes
 ------------
 * Scans are NEVER triggered automatically from the web application — all
   automatic scanning is owned exclusively by this process.
-* The first scan is triggered by the user through the web UI when they
-  initially configure their GitHub token (see /setup-token route in app.py).
+* The first scan is triggered by an admin on the /setup-repos page when
+  they enable one or more repositories (see setup_repos_submit in app.py).
+  Repos are cloned with git — no GitHub token or API rate limits apply.
 * The scheduler enforces a 90-minute staleness guard: if a scan completed
-  less than 90 minutes ago (e.g. the user just ran the initial scan), the
-  cron job silently skips its fire to avoid scanning twice in quick succession.
+  less than 90 minutes ago (e.g. the initial clone+index just finished),
+  the cron job silently skips its fire to avoid back-to-back scans.
 * Imports run_scan() directly from ruleradar — no subprocess overhead.
 * threading.Lock in ruleradar prevents overlapping scans if this process
   and the web process somehow fire simultaneously.
