@@ -1,0 +1,6 @@
+# Required
+pyyaml
+
+# Optional — enables automatic Sigma → Splunk SPL conversion
+# Uncomment if you want auto-conversion in Discord reports:
+# pySigma-backend-splunk
