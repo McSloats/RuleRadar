@@ -1,15 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 470 122" width="470" height="122">
-  <rect width="470" height="122" rx="8" fill="#160f2a"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 104" width="440" height="104">
+  <rect width="440" height="104" rx="8" fill="#160f2a"/>
   <text
     font-family="'Courier New', Courier, monospace"
     font-size="14"
     fill="#d4a017"
     xml:space="preserve">
-    <tspan x="12" y="20"> _____       _      _____            _            </tspan>
-    <tspan x="12" dy="18">|  __ \     | |    |  __ \          | |           </tspan>
-    <tspan x="12" dy="18">| |__) |   _| | ___| |__) |__ _  __| | __ _ _ __ </tspan>
-    <tspan x="12" dy="18">|  _  / | | | |/ _ \  _  // _` |/ _` |/ _` | '__|</tspan>
-    <tspan x="12" dy="18">| | \ \ |_| | |  __/ | \ \ (_| | (_| | (_| | |   </tspan>
-    <tspan x="12" dy="18">|_|  \_\__,_|_|\___|_|  \_\__,_|\__,_|\__,_|_|   </tspan>
+    <tspan x="12" y="20"> ____        _      ____            _</tspan>
+    <tspan x="12" dy="18">|  _ \ _   _| | ___|  _ \  __ _  __| | __ _ _ __</tspan>
+    <tspan x="12" dy="18">| |_) | | | | |/ _ \ |_) |/ _` |/ _` |/ _` | '__|</tspan>
+    <tspan x="12" dy="18">|  _ &lt;| |_| | |  __/  _ &lt;| (_| | (_| | (_| | |</tspan>
+    <tspan x="12" dy="18">|_| \_\\__,_|_|\___|_| \_\\__,_|\__,_|\__,_|_|</tspan>
   </text>
 </svg>
