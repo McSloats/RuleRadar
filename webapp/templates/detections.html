@@ -43,9 +43,10 @@
       <option value="informational" {% if severity == 'informational'   %}selected{% endif %}>Informational</option>
     </select>
     <select name="source">
-      <option value=""       {% if not source          %}selected{% endif %}>All Sources</option>
-      <option value="sigma"  {% if source == 'sigma'   %}selected{% endif %}>Sigma</option>
-      <option value="splunk" {% if source == 'splunk'  %}selected{% endif %}>Splunk</option>
+      <option value=""        {% if not source           %}selected{% endif %}>All Sources</option>
+      <option value="sigma"   {% if source == 'sigma'    %}selected{% endif %}>Sigma</option>
+      <option value="splunk"  {% if source == 'splunk'   %}selected{% endif %}>Splunk</option>
+      <option value="elastic" {% if source == 'elastic'  %}selected{% endif %}>Elastic</option>
     </select>
     <input type="text" name="mitre" value="{{ mitre }}"
            placeholder="MITRE (e.g. T1059, Execution)" style="min-width:180px;">

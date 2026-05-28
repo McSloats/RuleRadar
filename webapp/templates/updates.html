@@ -35,9 +35,10 @@
     <input type="text" name="title" value="{{ title }}"
            placeholder="Title…" style="flex:2; min-width:200px;">
     <select name="source">
-      <option value=""       {% if not source          %}selected{% endif %}>All Sources</option>
-      <option value="sigma"  {% if source == 'sigma'   %}selected{% endif %}>Sigma</option>
-      <option value="splunk" {% if source == 'splunk'  %}selected{% endif %}>Splunk</option>
+      <option value=""        {% if not source           %}selected{% endif %}>All Sources</option>
+      <option value="sigma"   {% if source == 'sigma'    %}selected{% endif %}>Sigma</option>
+      <option value="splunk"  {% if source == 'splunk'   %}selected{% endif %}>Splunk</option>
+      <option value="elastic" {% if source == 'elastic'  %}selected{% endif %}>Elastic</option>
     </select>
     <select name="change_type">
       <option value=""          {% if not change_type            %}selected{% endif %}>All Changes</option>
