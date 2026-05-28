@@ -146,7 +146,7 @@
         <th>Name</th>
         <th>Source</th>
         <th>Change Type</th>
-        <th>Search Query</th>
+        <th>Title Search</th>
         <th>MITRE</th>
         <th style="width:80px;"></th>
       </tr>
@@ -169,7 +169,7 @@
             <span class="text-muted text-small">all</span>
           {% endif %}
         </td>
-        <td class="text-muted text-small">{{ f.q or '—' }}</td>
+        <td class="text-muted text-small">{{ f.get('title', f.get('q', '')) or '—' }}</td>
         <td class="text-muted text-small">{{ f.get('mitre', '') or '—' }}</td>
         <td>
           <form method="post" action="{{ url_for('settings_filters_delete') }}"
@@ -215,9 +215,9 @@
       </div>
       <div style="flex:2; min-width:200px;">
         <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">
-          Search Query <span class="text-muted">(optional)</span>
+          Title Search <span class="text-muted">(optional)</span>
         </label>
-        <input type="text" name="q" class="wide" placeholder="keyword or phrase">
+        <input type="text" name="title" class="wide" placeholder="keyword or phrase">
       </div>
       <div style="flex:1; min-width:140px;">
         <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">

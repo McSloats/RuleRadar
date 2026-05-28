@@ -354,14 +354,20 @@ def index():
 @login_required
 def detections():
     """Searchable table of all known detection rules."""
-    q        = request.args.get("q", "").strip()
-    source   = request.args.get("source", "")
-    mitre    = request.args.get("mitre", "").strip()
-    page     = max(1, int(request.args.get("page", 1) or 1))
-    per_page = 50
+    title       = request.args.get("title",       "").strip()
+    description = request.args.get("description", "").strip()
+    severity    = request.args.get("severity",    "").strip().lower()
+    source      = request.args.get("source",      "")
+    mitre       = request.args.get("mitre",       "").strip()
+    days        = request.args.get("days",        "")
+    details_q   = request.args.get("details_q",   "").strip()
+    page        = max(1, int(request.args.get("page", 1) or 1))
+    per_page    = 50
 
     rows, total = db.search_detections(
-        query=q, source=source, mitre=mitre, page=page, per_page=per_page
+        title=title, description=description, severity=severity,
+        source=source, mitre=mitre, days=days, details_q=details_q,
+        page=page, per_page=per_page,
     )
     total_pages = max(1, (total + per_page - 1) // per_page)
 
@@ -369,7 +375,8 @@ def detections():
         "detections.html",
         rows=rows, total=total,
         page=page, total_pages=total_pages,
-        q=q, source=source, mitre=mitre,
+        title=title, description=description, severity=severity,
+        source=source, mitre=mitre, days=days, details_q=details_q,
         saved_filters=_get_saved_filters(),
     )
 
@@ -378,14 +385,18 @@ def detections():
 @login_required
 def updates():
     """Feed of new/modified/deleted rule events."""
-    source      = request.args.get("source", "")
+    source      = request.args.get("source",      "")
     change_type = request.args.get("change_type", "")
+    title       = request.args.get("title",       "").strip()
+    days        = request.args.get("days",        "")
+    details_q   = request.args.get("details_q",   "").strip()
     page        = max(1, int(request.args.get("page", 1) or 1))
     per_page    = 50
     offset      = (page - 1) * per_page
 
     rows, total = db.get_updates(
         source=source, change_type=change_type,
+        title=title, days=days, details_q=details_q,
         limit=per_page, offset=offset,
     )
     total_pages = max(1, (total + per_page - 1) // per_page)
@@ -395,6 +406,7 @@ def updates():
         rows=rows, total=total,
         page=page, total_pages=total_pages,
         source=source, change_type=change_type,
+        title=title, days=days, details_q=details_q,
         saved_filters=_get_saved_filters(),
     )
 
@@ -496,11 +508,11 @@ def settings_discord_test():
 @app.route("/settings/filters/add", methods=["POST"])
 @login_required
 def settings_filters_add():
-    name        = request.form.get("name", "").strip()
-    source      = request.form.get("source", "")
+    name        = request.form.get("name",        "").strip()
+    source      = request.form.get("source",      "")
     change_type = request.form.get("change_type", "")
-    q           = request.form.get("q", "").strip()
-    mitre       = request.form.get("mitre", "").strip()
+    title       = request.form.get("title",       "").strip()
+    mitre       = request.form.get("mitre",       "").strip()
 
     if not name:
         flash("Filter name is required.", "error")
@@ -521,14 +533,14 @@ def settings_filters_add():
         "name":        name,
         "source":      source,
         "change_type": change_type,
-        "q":           q,
+        "title":       title,
         "mitre":       mitre,
     })
     db.update_user_filters(current_user.id, json.dumps(filters))
     db.log_activity("user", f"Saved filter '{name}' added", actor=current_user.username,
                     detail=(
                         f"source={source or 'all'}, change_type={change_type or 'all'}, "
-                        f"q={q or ''}, mitre={mitre or ''}"
+                        f"title={title or ''}, mitre={mitre or ''}"
                     ))
     flash(f"Filter \"{name}\" saved.", "success")
     return redirect(url_for("settings"))

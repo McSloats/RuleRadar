@@ -13,8 +13,8 @@
   <span class="preset-label">Quick filters:</span>
   {% for f in saved_filters %}
   <a class="preset-btn"
-     href="{{ url_for('detections', source=f.source, q=f.q, mitre=f.get('mitre', '')) }}"
-     title="Source: {{ f.source or 'all' }} | Query: {{ f.q or 'none' }}{% if f.get('mitre') %} | MITRE: {{ f.mitre }}{% endif %}">
+     href="{{ url_for('detections', source=f.source, title=f.get('title', f.get('q', '')), mitre=f.get('mitre', '')) }}"
+     title="Source: {{ f.source or 'all' }}{% if f.get('title') or f.get('q') %} | Title: {{ f.get('title', f.get('q', '')) }}{% endif %}{% if f.get('mitre') %} | MITRE: {{ f.mitre }}{% endif %}">
     {{ f.name }}
   </a>
   {% endfor %}
@@ -22,28 +22,63 @@
 {% endif %}
 
 {# ── Filter form ──────────────────────────────────────────────────────────── #}
-<form method="get" action="{{ url_for('detections') }}" class="filter-form">
-  <input type="text" name="q" value="{{ q }}"
-         placeholder="Search title, description, logic, SPL…">
-  <select name="source">
-    <option value=""       {% if not source          %}selected{% endif %}>All Sources</option>
-    <option value="sigma"  {% if source == 'sigma'   %}selected{% endif %}>Sigma</option>
-    <option value="splunk" {% if source == 'splunk'  %}selected{% endif %}>Splunk</option>
-  </select>
-  <input type="text" name="mitre" value="{{ mitre }}"
-         placeholder="MITRE (e.g. T1059, Execution)"
-         style="min-width:190px;">
-  <button type="submit" class="btn btn-primary">Search</button>
-  {% if q or source or mitre %}
-    <a href="{{ url_for('detections') }}" class="btn btn-secondary">Clear</a>
-  {% endif %}
+<style>
+.filter-form-multi { display:flex; flex-direction:column; gap:0.5rem; margin-bottom:1rem; }
+.filter-row { display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; }
+.filter-row input[type="text"] { flex:1; min-width:130px; }
+.filter-row select { min-width:130px; }
+</style>
+
+<form method="get" action="{{ url_for('detections') }}" class="filter-form-multi">
+  {# Row 1 — one filter per main table column #}
+  <div class="filter-row">
+    <input type="text" name="title" value="{{ title }}"
+           placeholder="Title…" style="flex:2; min-width:160px;">
+    <select name="severity">
+      <option value=""              {% if not severity                  %}selected{% endif %}>All Severities</option>
+      <option value="critical"      {% if severity == 'critical'        %}selected{% endif %}>Critical</option>
+      <option value="high"          {% if severity == 'high'            %}selected{% endif %}>High</option>
+      <option value="medium"        {% if severity == 'medium'          %}selected{% endif %}>Medium</option>
+      <option value="low"           {% if severity == 'low'             %}selected{% endif %}>Low</option>
+      <option value="informational" {% if severity == 'informational'   %}selected{% endif %}>Informational</option>
+    </select>
+    <select name="source">
+      <option value=""       {% if not source          %}selected{% endif %}>All Sources</option>
+      <option value="sigma"  {% if source == 'sigma'   %}selected{% endif %}>Sigma</option>
+      <option value="splunk" {% if source == 'splunk'  %}selected{% endif %}>Splunk</option>
+    </select>
+    <input type="text" name="mitre" value="{{ mitre }}"
+           placeholder="MITRE (e.g. T1059, Execution)" style="min-width:180px;">
+    <input type="text" name="description" value="{{ description }}"
+           placeholder="Description…" style="flex:2; min-width:160px;">
+    <select name="days">
+      <option value=""   {% if not days      %}selected{% endif %}>Any time</option>
+      <option value="7"  {% if days == '7'   %}selected{% endif %}>Last 7 days</option>
+      <option value="30" {% if days == '30'  %}selected{% endif %}>Last 30 days</option>
+      <option value="90" {% if days == '90'  %}selected{% endif %}>Last 90 days</option>
+    </select>
+  </div>
+  {# Row 2 — keyword search across all expanded-detail fields #}
+  <div class="filter-row">
+    <input type="text" name="details_q" value="{{ details_q }}"
+           placeholder="Details search — logic, SPL, author, status, refs…"
+           style="flex:1; min-width:260px;">
+    <button type="submit" class="btn btn-primary">Search</button>
+    {% if title or description or severity or source or mitre or days or details_q %}
+      <a href="{{ url_for('detections') }}" class="btn btn-secondary">Clear</a>
+    {% endif %}
+  </div>
 </form>
 
 <p class="result-count">
   {{ total }} detection{{ 's' if total != 1 else '' }}
-  {% if q %} matching <strong>{{ q }}</strong>{% endif %}
+  {% if title %} with title matching <strong>{{ title }}</strong>{% endif %}
+  {% if description %} description matching <strong>{{ description }}</strong>{% endif %}
+  {% if severity %} severity <strong>{{ severity }}</strong>{% endif %}
   {% if source %} in <strong>{{ source }}</strong>{% endif %}
-  {% if mitre %} with MITRE <strong>{{ mitre }}</strong>{% endif %}
+  {% if mitre %} MITRE <strong>{{ mitre }}</strong>{% endif %}
+  {% if days %} in the last <strong>{{ days }} days</strong>{% endif %}
+  {% if details_q %} details matching <strong>{{ details_q }}</strong>{% endif %}
 </p>
 
 {# ── Results table ────────────────────────────────────────────────────────── #}
@@ -192,13 +227,15 @@
 </div>
 
 {# ── Pagination ───────────────────────────────────────────────────────────── #}
+{% set pg_args = {'title': title, 'description': description, 'severity': severity,
+                  'source': source, 'mitre': mitre, 'days': days, 'details_q': details_q} %}
 {% if total_pages > 1 %}
 <div class="pagination">
   <span class="pg-info">Page {{ page }} of {{ total_pages }}</span>
 
   {% if page > 1 %}
-    <a href="{{ url_for('detections', q=q, source=source, mitre=mitre, page=1) }}">«</a>
-    <a href="{{ url_for('detections', q=q, source=source, mitre=mitre, page=page-1) }}">‹ Prev</a>
+    <a href="{{ url_for('detections', **pg_args, page=1) }}">«</a>
+    <a href="{{ url_for('detections', **pg_args, page=page-1) }}">‹ Prev</a>
   {% endif %}
 
   {% set start_pg = [1, page - 2] | max %}
@@ -207,13 +244,13 @@
     {% if p == page %}
       <span class="pg-current">{{ p }}</span>
     {% else %}
-      <a href="{{ url_for('detections', q=q, source=source, mitre=mitre, page=p) }}">{{ p }}</a>
+      <a href="{{ url_for('detections', **pg_args, page=p) }}">{{ p }}</a>
     {% endif %}
   {% endfor %}
 
   {% if page < total_pages %}
-    <a href="{{ url_for('detections', q=q, source=source, mitre=mitre, page=page+1) }}">Next ›</a>
-    <a href="{{ url_for('detections', q=q, source=source, mitre=mitre, page=total_pages) }}">»</a>
+    <a href="{{ url_for('detections', **pg_args, page=page+1) }}">Next ›</a>
+    <a href="{{ url_for('detections', **pg_args, page=total_pages) }}">»</a>
   {% endif %}
 </div>
 {% endif %}
@@ -221,7 +258,7 @@
 {% else %}
 <div class="empty-state">
   <p>
-    {% if q or source or mitre %}
+    {% if title or description or severity or source or mitre or days or details_q %}
       No detections found matching your filters.
     {% else %}
       No detections in the database yet.<br>The initial scan is running in the background — check back shortly.

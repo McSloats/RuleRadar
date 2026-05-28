@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 # In Docker the RULERADAR_DB env var points the DB into the named volume.
@@ -500,35 +500,60 @@ def delete_detection(source: str, file_path: str):
 
 
 def search_detections(
-    query: str = "",
+    title: str = "",
+    description: str = "",
+    severity: str = "",
     source: str = "",
     mitre: str = "",
+    days: str = "",
+    details_q: str = "",
     page: int = 1,
     per_page: int = 50,
 ) -> tuple[list[dict], int]:
     """
-    Full-text search across detections.
-    - query  : searches title, description, detection_logic, spl
-    - source : 'sigma' | 'splunk' | '' (all)
-    - mitre  : searches mitre_techniques and mitre_tactics (e.g. 'T1059' or 'Execution')
+    Search detections with per-field filters and a detail-panel keyword search.
+    - title       : searches title only
+    - description : searches description only
+    - severity    : exact match ('critical'|'high'|'medium'|'low'|'informational'|'')
+    - source      : 'sigma' | 'splunk' | '' (all)
+    - mitre       : searches mitre_techniques and mitre_tactics (e.g. 'T1059' or 'Execution')
+    - days        : '7'|'30'|'90'|'' — limit to rules updated in the last N days
+    - details_q   : keyword across detection_logic, spl, author, rule_status, rule_date, refs
     Returns (rows, total_count).
     """
     conditions, params = [], []
-    if query:
-        conditions.append(
-            "(title LIKE ? OR description LIKE ? OR detection_logic LIKE ? OR spl LIKE ?)"
-        )
-        like = f"%{query}%"
-        params += [like, like, like, like]
+    if title:
+        conditions.append("title LIKE ?")
+        params.append(f"%{title}%")
+    if description:
+        conditions.append("description LIKE ?")
+        params.append(f"%{description}%")
+    if severity:
+        conditions.append("LOWER(severity) = ?")
+        params.append(severity.lower())
     if source:
         conditions.append("source = ?")
         params.append(source)
     if mitre:
-        conditions.append(
-            "(mitre_techniques LIKE ? OR mitre_tactics LIKE ?)"
-        )
+        conditions.append("(mitre_techniques LIKE ? OR mitre_tactics LIKE ?)")
         like = f"%{mitre}%"
         params += [like, like]
+    if days:
+        try:
+            cutoff = (
+                datetime.now(timezone.utc) - timedelta(days=int(days))
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+            conditions.append("last_updated >= ?")
+            params.append(cutoff)
+        except ValueError:
+            pass
+    if details_q:
+        conditions.append(
+            "(detection_logic LIKE ? OR spl LIKE ? OR author LIKE ?"
+            " OR rule_status LIKE ? OR rule_date LIKE ? OR refs LIKE ?)"
+        )
+        like = f"%{details_q}%"
+        params += [like, like, like, like, like, like]
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
@@ -562,7 +587,13 @@ def record_update(
 
 
 def get_updates(
-    source: str = "", change_type: str = "", limit: int = 100, offset: int = 0
+    source: str = "",
+    change_type: str = "",
+    title: str = "",
+    days: str = "",
+    details_q: str = "",
+    limit: int = 100,
+    offset: int = 0,
 ) -> tuple[list[dict], int]:
     """
     Return paginated update events, newest first.
@@ -571,6 +602,13 @@ def get_updates(
     (author, rule_status, rule_date, description, refs) via a LEFT JOIN so
     that the expand panel can show full rule context.  Deleted rules will
     have empty strings for those fields.
+
+    - source      : 'sigma' | 'splunk' | '' (all)
+    - change_type : 'new' | 'modified' | 'deleted' | 'renamed' | ''
+    - title       : keyword search on title
+    - days        : '7'|'30'|'90'|'' — limit to events detected in the last N days
+    - details_q   : keyword across description, detection_logic, spl, author, rule_status,
+                    rule_date, refs (joined from detections for non-deleted rules)
     """
     conds, params = [], []
     if source:
@@ -579,11 +617,36 @@ def get_updates(
     if change_type:
         conds.append("u.change_type = ?")
         params.append(change_type)
+    if title:
+        conds.append("u.title LIKE ?")
+        params.append(f"%{title}%")
+    if days:
+        try:
+            cutoff = (
+                datetime.now(timezone.utc) - timedelta(days=int(days))
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+            conds.append("u.detected_at >= ?")
+            params.append(cutoff)
+        except ValueError:
+            pass
+    if details_q:
+        like = f"%{details_q}%"
+        conds.append(
+            "(u.detection_logic LIKE ? OR u.spl LIKE ?"
+            " OR COALESCE(d.author,      '') LIKE ?"
+            " OR COALESCE(d.rule_status, '') LIKE ?"
+            " OR COALESCE(d.rule_date,   '') LIKE ?"
+            " OR COALESCE(d.description, '') LIKE ?"
+            " OR COALESCE(d.refs,        '') LIKE ?)"
+        )
+        params += [like, like, like, like, like, like, like]
 
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
+    join  = "LEFT JOIN detections d ON d.source = u.source AND d.file_path = u.file_path"
+
     with get_conn() as conn:
         total = conn.execute(
-            f"SELECT COUNT(*) FROM updates u {where}", params
+            f"SELECT COUNT(*) FROM updates u {join} {where}", params
         ).fetchone()[0]
         rows = conn.execute(
             f"""SELECT u.*,
@@ -593,8 +656,7 @@ def get_updates(
                        COALESCE(d.description, '') AS description,
                        COALESCE(d.refs,        '') AS refs
                 FROM updates u
-                LEFT JOIN detections d
-                       ON d.source = u.source AND d.file_path = u.file_path
+                {join}
                 {where}
                 ORDER BY u.detected_at DESC LIMIT ? OFFSET ?""",
             params + [limit, offset],

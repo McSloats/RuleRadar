@@ -13,8 +13,8 @@
   <span class="preset-label">Quick filters:</span>
   {% for f in saved_filters %}
   <a class="preset-btn"
-     href="{{ url_for('updates', source=f.source, change_type=f.change_type) }}"
-     title="Source: {{ f.source or 'all' }} | Change: {{ f.change_type or 'all' }}">
+     href="{{ url_for('updates', source=f.source, change_type=f.change_type, title=f.get('title', f.get('q', ''))) }}"
+     title="Source: {{ f.source or 'all' }} | Change: {{ f.change_type or 'all' }}{% if f.get('title') or f.get('q') %} | Title: {{ f.get('title', f.get('q', '')) }}{% endif %}">
     {{ f.name }}
   </a>
   {% endfor %}
@@ -22,29 +22,56 @@
 {% endif %}
 
 {# ── Filter form ──────────────────────────────────────────────────────────── #}
-<form method="get" action="{{ url_for('updates') }}" class="filter-form">
-  <select name="source">
-    <option value=""       {% if not source          %}selected{% endif %}>All Sources</option>
-    <option value="sigma"  {% if source == 'sigma'   %}selected{% endif %}>Sigma</option>
-    <option value="splunk" {% if source == 'splunk'  %}selected{% endif %}>Splunk</option>
-  </select>
-  <select name="change_type">
-    <option value=""          {% if not change_type            %}selected{% endif %}>All Changes</option>
-    <option value="new"       {% if change_type == 'new'       %}selected{% endif %}>New</option>
-    <option value="modified"  {% if change_type == 'modified'  %}selected{% endif %}>Modified</option>
-    <option value="deleted"   {% if change_type == 'deleted'   %}selected{% endif %}>Deleted</option>
-    <option value="renamed"   {% if change_type == 'renamed'   %}selected{% endif %}>Renamed</option>
-  </select>
-  <button type="submit" class="btn btn-primary">Filter</button>
-  {% if source or change_type %}
-    <a href="{{ url_for('updates') }}" class="btn btn-secondary">Clear</a>
-  {% endif %}
+<style>
+.filter-form-multi { display:flex; flex-direction:column; gap:0.5rem; margin-bottom:1rem; }
+.filter-row { display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; }
+.filter-row input[type="text"] { flex:1; min-width:130px; }
+.filter-row select { min-width:130px; }
+</style>
+
+<form method="get" action="{{ url_for('updates') }}" class="filter-form-multi">
+  {# Row 1 — one filter per main table column #}
+  <div class="filter-row">
+    <input type="text" name="title" value="{{ title }}"
+           placeholder="Title…" style="flex:2; min-width:200px;">
+    <select name="source">
+      <option value=""       {% if not source          %}selected{% endif %}>All Sources</option>
+      <option value="sigma"  {% if source == 'sigma'   %}selected{% endif %}>Sigma</option>
+      <option value="splunk" {% if source == 'splunk'  %}selected{% endif %}>Splunk</option>
+    </select>
+    <select name="change_type">
+      <option value=""          {% if not change_type            %}selected{% endif %}>All Changes</option>
+      <option value="new"       {% if change_type == 'new'       %}selected{% endif %}>New</option>
+      <option value="modified"  {% if change_type == 'modified'  %}selected{% endif %}>Modified</option>
+      <option value="deleted"   {% if change_type == 'deleted'   %}selected{% endif %}>Deleted</option>
+      <option value="renamed"   {% if change_type == 'renamed'   %}selected{% endif %}>Renamed</option>
+    </select>
+    <select name="days">
+      <option value=""   {% if not days      %}selected{% endif %}>Any time</option>
+      <option value="7"  {% if days == '7'   %}selected{% endif %}>Last 7 days</option>
+      <option value="30" {% if days == '30'  %}selected{% endif %}>Last 30 days</option>
+      <option value="90" {% if days == '90'  %}selected{% endif %}>Last 90 days</option>
+    </select>
+  </div>
+  {# Row 2 — keyword search across all expanded-detail fields #}
+  <div class="filter-row">
+    <input type="text" name="details_q" value="{{ details_q }}"
+           placeholder="Details search — description, logic, SPL, author, status, refs…"
+           style="flex:1; min-width:260px;">
+    <button type="submit" class="btn btn-primary">Search</button>
+    {% if title or source or change_type or days or details_q %}
+      <a href="{{ url_for('updates') }}" class="btn btn-secondary">Clear</a>
+    {% endif %}
+  </div>
 </form>
 
 <p class="result-count">
   {{ total }} event{{ 's' if total != 1 else '' }}
+  {% if title %} with title matching <strong>{{ title }}</strong>{% endif %}
   {% if source %} from <strong>{{ source }}</strong>{% endif %}
   {% if change_type %} — <strong>{{ change_type }}</strong> only{% endif %}
+  {% if days %} in the last <strong>{{ days }} days</strong>{% endif %}
+  {% if details_q %} details matching <strong>{{ details_q }}</strong>{% endif %}
 </p>
 
 {# ── Results table ────────────────────────────────────────────────────────── #}
@@ -148,13 +175,15 @@
 </div>
 
 {# ── Pagination ───────────────────────────────────────────────────────────── #}
+{% set pg_args = {'source': source, 'change_type': change_type,
+                  'title': title, 'days': days, 'details_q': details_q} %}
 {% if total_pages > 1 %}
 <div class="pagination">
   <span class="pg-info">Page {{ page }} of {{ total_pages }}</span>
 
   {% if page > 1 %}
-    <a href="{{ url_for('updates', source=source, change_type=change_type, page=1) }}">«</a>
-    <a href="{{ url_for('updates', source=source, change_type=change_type, page=page-1) }}">‹ Prev</a>
+    <a href="{{ url_for('updates', **pg_args, page=1) }}">«</a>
+    <a href="{{ url_for('updates', **pg_args, page=page-1) }}">‹ Prev</a>
   {% endif %}
 
   {% set start_pg = [1, page - 2] | max %}
@@ -163,13 +192,13 @@
     {% if p == page %}
       <span class="pg-current">{{ p }}</span>
     {% else %}
-      <a href="{{ url_for('updates', source=source, change_type=change_type, page=p) }}">{{ p }}</a>
+      <a href="{{ url_for('updates', **pg_args, page=p) }}">{{ p }}</a>
     {% endif %}
   {% endfor %}
 
   {% if page < total_pages %}
-    <a href="{{ url_for('updates', source=source, change_type=change_type, page=page+1) }}">Next ›</a>
-    <a href="{{ url_for('updates', source=source, change_type=change_type, page=total_pages) }}">»</a>
+    <a href="{{ url_for('updates', **pg_args, page=page+1) }}">Next ›</a>
+    <a href="{{ url_for('updates', **pg_args, page=total_pages) }}">»</a>
   {% endif %}
 </div>
 {% endif %}
@@ -177,7 +206,7 @@
 {% else %}
 <div class="empty-state">
   <p>
-    {% if source or change_type %}
+    {% if title or source or change_type or days or details_q %}
       No updates found matching your filters.
     {% else %}
       No updates recorded yet.<br>
