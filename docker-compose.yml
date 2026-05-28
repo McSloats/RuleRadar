@@ -24,7 +24,7 @@ services:
   scheduler:
     build: .
     container_name: ruleradar-scheduler
-    command: ["python3", "scheduler.py"]
+    command: ["python3", "core/scheduler.py"]
     volumes:
       - ruleradar-db:/app/data
     environment:

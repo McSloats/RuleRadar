@@ -21,11 +21,14 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Allow importing from the project root
-sys.path.insert(0, str(Path(__file__).parent))
+# Ensure the project root is on sys.path so this can be run directly
+# (`python3 core/scheduler.py`) or imported as a package member.
+_ROOT = Path(__file__).parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
-import database as db
-import ruleradar
+from core import database as db
+from core import ruleradar
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger

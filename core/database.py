@@ -12,8 +12,8 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 # In Docker the RULERADAR_DB env var points the DB into the named volume.
-# Locally it defaults to the project root so nothing extra is needed.
-DB_PATH = Path(os.environ.get("RULERADAR_DB", str(Path(__file__).parent / "ruleradar.db")))
+# Locally it defaults to the project root (core/../ruleradar.db).
+DB_PATH = Path(os.environ.get("RULERADAR_DB", str(Path(__file__).parent.parent / "ruleradar.db")))
 
 SCHEMA = """
 PRAGMA journal_mode = WAL;

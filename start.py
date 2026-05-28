@@ -18,8 +18,8 @@ from pathlib import Path
 BASE   = Path(__file__).parent
 PY     = sys.executable   # same interpreter that launched this script
 WEBAPP = BASE / "webapp" / "app.py"
-SCHED  = BASE / "scheduler.py"
-RADAR  = BASE / "ruleradar.py"
+SCHED  = BASE / "core" / "scheduler.py"
+RADAR  = BASE / "core" / "ruleradar.py"
 
 
 def start(script: Path) -> subprocess.Popen:

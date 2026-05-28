@@ -8,7 +8,7 @@
 Monitors detection rule repositories — [SigmaHQ/sigma](https://github.com/SigmaHQ/sigma), [splunk/security_content](https://github.com/splunk/security_content), and [elastic/detection-rules](https://github.com/elastic/detection-rules) — for new, modified, deleted, and renamed rules. All data is stored in a local SQLite database and browsable through a built-in web interface. No config files required — everything is configured through the web UI.
 
 <p align="center">
-  <img src="Homepage.png" alt="RuleRadar — Detections page" width="900">
+  <img src="docs/Homepage.png" alt="RuleRadar — Detections page" width="900">
 </p>
 
 ## What it does
@@ -54,9 +54,9 @@ On the very first visit you are prompted to create an admin account. After loggi
 
 | Command | What it does |
 |---------|-------------|
-| `python3 ruleradar.py` | Run one scan cycle immediately |
+| `python3 core/ruleradar.py` | Run one scan cycle immediately |
 | `python3 webapp/app.py` | Web interface only (port 5000) |
-| `python3 scheduler.py` | Bi-hourly scheduler only |
+| `python3 core/scheduler.py` | Bi-hourly scheduler only |
 
 ---
 

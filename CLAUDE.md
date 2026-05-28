@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-RuleRadar is a Flask + SQLite security detection rule monitor. It clones [SigmaHQ/sigma](https://github.com/SigmaHQ/sigma) and [splunk/security_content](https://github.com/splunk/security_content) locally via git and tracks new, modified, deleted, and renamed detection rules through a dark-themed web interface.
+RuleRadar is a Flask + SQLite security detection rule monitor. It clones [SigmaHQ/sigma](https://github.com/SigmaHQ/sigma), [splunk/security_content](https://github.com/splunk/security_content), and [elastic/detection-rules](https://github.com/elastic/detection-rules) locally via git and tracks new, modified, deleted, and renamed detection rules through a dark-themed web interface.
 
 ## Commands
 
@@ -18,9 +18,9 @@ python3 start.py --run-now  # also fires one immediate scan on startup
 
 ### Run components individually
 ```bash
-python3 webapp/app.py     # web only
-python3 scheduler.py      # scheduler only
-python3 ruleradar.py      # run one scan cycle immediately
+python3 webapp/app.py        # web only
+python3 core/scheduler.py    # scheduler only
+python3 core/ruleradar.py    # run one scan cycle immediately
 ```
 
 ### Docker
@@ -39,11 +39,11 @@ Controlled by env var `RULERADAR_DB` (defaults to `./ruleradar.db`). In Docker i
 ### Process model
 Two processes share one SQLite database (WAL mode):
 - **`webapp/app.py`** — Flask web server; never triggers scans automatically
-- **`scheduler.py`** — fires `ruleradar.run_scan()` at every even UTC hour via APScheduler `CronTrigger(hour="*/2")`. Has a 90-minute staleness guard to skip if a scan completed recently.
+- **`core/scheduler.py`** — fires `ruleradar.run_scan()` at every even UTC hour via APScheduler `CronTrigger(hour="*/2")`. Has a 90-minute staleness guard to skip if a scan completed recently.
 
 The initial scan is always triggered by an admin on `/setup-repos`, which calls `_start_background_scan()` (daemon thread in the web process).
 
-### Scanning flow (`ruleradar.py`)
+### Scanning flow (`core/ruleradar.py`)
 ```
 repos.status = 'pending'  →  clone_repo()  [git clone --depth=1]
                            →  index_repo()  [os.walk all YAML files]
@@ -56,7 +56,7 @@ Changed-file status codes from `git diff --name-status`: A=Added, M=Modified, D=
 
 All clones live at `REPOS_DIR = db.DB_PATH.parent / "repos"` (i.e. `/app/data/repos` in Docker).
 
-### Database schema (`database.py`)
+### Database schema (`core/database.py`)
 Key tables:
 - **`detections`** — current state of every known rule: `source`, `file_path`, `title`, `description`, `detection_logic`, `spl`, `author`, `rule_status`, `severity`, `rule_date`, `refs`, `mitre_techniques`, `mitre_tactics`, `rule_url`
 - **`updates`** — append-only change log: `source`, `file_path`, `title`, `change_type` (new/modified/deleted/renamed), `detection_logic`, `spl`, `rule_url`, `detected_at`

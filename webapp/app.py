@@ -49,8 +49,8 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 import bcrypt
-import database as db
-import ruleradar
+from core import database as db
+from core import ruleradar
 
 from flask import (
     Flask, abort, flash, jsonify, redirect,

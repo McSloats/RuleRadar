@@ -34,7 +34,13 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import database as db
+# Ensure the project root is on sys.path so this module can be run directly
+# (e.g. `python3 core/ruleradar.py`) as well as imported as a package member.
+_ROOT = Path(__file__).parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from core import database as db
 
 # ── Optional Python dependencies ───────────────────────────────────────────────
 try:
