@@ -148,6 +148,8 @@
         <th>Change Type</th>
         <th>Title Search</th>
         <th>MITRE</th>
+        <th>Severity</th>
+        <th>Days</th>
         <th style="width:80px;"></th>
       </tr>
     </thead>
@@ -171,6 +173,8 @@
         </td>
         <td class="text-muted text-small">{{ f.get('title', f.get('q', '')) or '—' }}</td>
         <td class="text-muted text-small">{{ f.get('mitre', '') or '—' }}</td>
+        <td class="text-muted text-small">{{ f.get('severity', '') or '—' }}</td>
+        <td class="text-muted text-small">{{ f.get('days', '') or '—' }}</td>
         <td>
           <form method="post" action="{{ url_for('settings_filters_delete') }}"
                 style="display:inline;" onsubmit="return confirm('Remove this filter?');">
@@ -225,6 +229,30 @@
           MITRE TTP <span class="text-muted">(optional)</span>
         </label>
         <input type="text" name="mitre" class="wide" placeholder="e.g. T1059 or Execution">
+      </div>
+      <div style="flex:1; min-width:120px;">
+        <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">
+          Severity <span class="text-muted">(optional)</span>
+        </label>
+        <select name="severity" class="wide">
+          <option value="">Any</option>
+          <option value="critical">Critical</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+          <option value="informational">Informational</option>
+        </select>
+      </div>
+      <div style="flex:1; min-width:100px;">
+        <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">
+          Time Window <span class="text-muted">(optional)</span>
+        </label>
+        <select name="days" class="wide">
+          <option value="">Any time</option>
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
+        </select>
       </div>
     </div>
     <button type="submit" class="btn btn-primary">Save Filter</button>

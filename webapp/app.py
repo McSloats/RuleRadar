@@ -513,6 +513,8 @@ def settings_filters_add():
     change_type = request.form.get("change_type", "")
     title       = request.form.get("title",       "").strip()
     mitre       = request.form.get("mitre",       "").strip()
+    severity    = request.form.get("severity",    "")
+    days        = request.form.get("days",        "")
 
     if not name:
         flash("Filter name is required.", "error")
@@ -535,12 +537,15 @@ def settings_filters_add():
         "change_type": change_type,
         "title":       title,
         "mitre":       mitre,
+        "severity":    severity,
+        "days":        days,
     })
     db.update_user_filters(current_user.id, json.dumps(filters))
     db.log_activity("user", f"Saved filter '{name}' added", actor=current_user.username,
                     detail=(
                         f"source={source or 'all'}, change_type={change_type or 'all'}, "
-                        f"title={title or ''}, mitre={mitre or ''}"
+                        f"title={title or ''}, mitre={mitre or ''}, "
+                        f"severity={severity or ''}, days={days or ''}"
                     ))
     flash(f"Filter \"{name}\" saved.", "success")
     return redirect(url_for("settings"))

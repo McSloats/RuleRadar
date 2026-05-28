@@ -52,8 +52,8 @@ def main():
     print("┌─────────────────────────────────────────┐", flush=True)
     print("│           RuleRadar is running          │", flush=True)
     print("├─────────────────────────────────────────┤", flush=True)
-    print(f"│  Web        http://localhost:5000        │", flush=True)
-    print(f"│  Scheduler  daily at 08:00 ET            │", flush=True)
+    print("│  Web        http://localhost:5000        │", flush=True)
+    print("│  Scheduler  every 2 h, even UTC hours   │", flush=True)
     print("│  Press Ctrl+C to stop all services      │", flush=True)
     print("└─────────────────────────────────────────┘\n", flush=True)
 

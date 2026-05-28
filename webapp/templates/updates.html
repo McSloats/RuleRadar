@@ -13,8 +13,8 @@
   <span class="preset-label">Quick filters:</span>
   {% for f in saved_filters %}
   <a class="preset-btn"
-     href="{{ url_for('updates', source=f.source, change_type=f.change_type, title=f.get('title', f.get('q', ''))) }}"
-     title="Source: {{ f.source or 'all' }} | Change: {{ f.change_type or 'all' }}{% if f.get('title') or f.get('q') %} | Title: {{ f.get('title', f.get('q', '')) }}{% endif %}">
+     href="{{ url_for('updates', source=f.source, change_type=f.change_type, title=f.get('title', f.get('q', '')), days=f.get('days', '')) }}"
+     title="Source: {{ f.source or 'all' }} | Change: {{ f.change_type or 'all' }}{% if f.get('title') or f.get('q') %} | Title: {{ f.get('title', f.get('q', '')) }}{% endif %}{% if f.get('days') %} | Last {{ f.days }} days{% endif %}">
     {{ f.name }}
   </a>
   {% endfor %}
@@ -22,13 +22,6 @@
 {% endif %}
 
 {# ── Filter form ──────────────────────────────────────────────────────────── #}
-<style>
-.filter-form-multi { display:flex; flex-direction:column; gap:0.5rem; margin-bottom:1rem; }
-.filter-row { display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; }
-.filter-row input[type="text"] { flex:1; min-width:130px; }
-.filter-row select { min-width:130px; }
-</style>
-
 <form method="get" action="{{ url_for('updates') }}" class="filter-form-multi">
   {# Row 1 — one filter per main table column #}
   <div class="filter-row">
@@ -137,6 +130,16 @@
             {# For Splunk content the SPL field IS the detection logic #}
             {% if row.spl %}
               <p class="detail-label">Detection Logic (SPL)</p>
+              <pre>{{ row.spl }}</pre>
+            {% endif %}
+          {% elif row.source == 'elastic' %}
+            {# Elastic: EQL/KQL/ES|QL query first, then auto-translated SPL template #}
+            {% if row.detection_logic %}
+              <p class="detail-label">Detection Logic (EQL / KQL)</p>
+              <pre>{{ row.detection_logic }}</pre>
+            {% endif %}
+            {% if row.spl %}
+              <p class="detail-label">Splunk SPL (auto-translated)</p>
               <pre>{{ row.spl }}</pre>
             {% endif %}
           {% else %}

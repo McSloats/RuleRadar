@@ -104,7 +104,7 @@ AVAILABLE_REPOS: dict[str, dict] = {
         "owner":        "elastic",
         "repo":         "detection-rules",
         "branch":       "main",
-        "paths":        ["rules/", "rules_building_block/"],
+        "paths":        ["rules/"],
         "parser":       "elastic",
     },
 }

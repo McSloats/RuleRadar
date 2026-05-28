@@ -72,8 +72,9 @@ Schema migrations live in `_migrate_schema()` using try/except ALTER TABLE (idem
 ### Parser differences
 - **Sigma** (`_process_sigma`): `detection_logic` = the YAML `detection:` block; `spl` = pySigma SPL translation (may be empty if library unavailable)
 - **Splunk** (`_process_splunk`): `detection_logic` = "" (empty); `spl` = the `search:` field
+- **Elastic** (`_process_elastic`): parses TOML rule files (`.toml`) via `tomllib` (Python 3.11+ stdlib) or `tomli` backport; `detection_logic` = `[EQL]\nquery` (or `[KQL]`/`[ES|QL]` depending on `rule.type`); `spl` = auto-translated SPL template via `elastic_to_spl()` using `_ECS_TO_SPL` (60+ ECS→Splunk CIM field mappings). Translated SPL is clearly marked as a template, not production-ready.
 
-Templates branch on `row.source == 'splunk'` to label logic correctly.
+Templates branch on `row.source` to label logic correctly: `'splunk'` → "Detection Logic (SPL)", `'elastic'` → "Detection Logic (EQL / KQL)" + "Splunk SPL (auto-translated)", otherwise plain "Detection Logic".
 
 ### Web app (`webapp/app.py`)
 - Flask-Login with bcrypt. First visit → `/setup` (create admin). No repos configured → `/setup-repos`.
@@ -97,6 +98,8 @@ All CSS (~880 lines) and JS are inline in `layout.html` — no external dependen
 Form field wrappers must use `class="form-group"` (not `form-field` — that class does not exist).
 
 **Badge classes for activity log categories:** `.badge-auth`, `.badge-admin`, `.badge-user`, `.badge-system`, `.badge-new` (scan). Level badges: `.badge-deleted` (error/red), `.badge-warning` (warning/gold), `.badge-user` (info).
+
+**Saved filters** are stored as a JSON array in `user_settings.saved_filters`. Each filter object has keys: `id`, `name`, `source`, `change_type`, `title`, `mitre`, `severity`, `days`. Preset buttons on the Detections page pass all fields; Updates page presets omit `severity` (not applicable there). Old filters lacking new keys are read safely via `f.get('key', '')`.
 
 ### Static assets
 - `webapp/static/icon.svg` — Shield Radar icon (44×48), used in nav and auth page headers
