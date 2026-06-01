@@ -179,15 +179,13 @@
 </div>
 
 {# ── Pagination ───────────────────────────────────────────────────────────── #}
-{% set pg_args = {'source': source, 'change_type': change_type,
-                  'title': title, 'days': days, 'details_q': details_q} %}
 {% if total_pages > 1 %}
 <div class="pagination">
   <span class="pg-info">Page {{ page }} of {{ total_pages }}</span>
 
   {% if page > 1 %}
-    <a href="{{ url_for('updates', **pg_args, page=1) }}">«</a>
-    <a href="{{ url_for('updates', **pg_args, page=page-1) }}">‹ Prev</a>
+    <a href="{{ url_for('updates', source=source, change_type=change_type, title=title, days=days, details_q=details_q, page=1) }}">«</a>
+    <a href="{{ url_for('updates', source=source, change_type=change_type, title=title, days=days, details_q=details_q, page=page-1) }}">‹ Prev</a>
   {% endif %}
 
   {% set start_pg = [1, page - 2] | max %}
@@ -196,13 +194,13 @@
     {% if p == page %}
       <span class="pg-current">{{ p }}</span>
     {% else %}
-      <a href="{{ url_for('updates', **pg_args, page=p) }}">{{ p }}</a>
+      <a href="{{ url_for('updates', source=source, change_type=change_type, title=title, days=days, details_q=details_q, page=p) }}">{{ p }}</a>
     {% endif %}
   {% endfor %}
 
   {% if page < total_pages %}
-    <a href="{{ url_for('updates', **pg_args, page=page+1) }}">Next ›</a>
-    <a href="{{ url_for('updates', **pg_args, page=total_pages) }}">»</a>
+    <a href="{{ url_for('updates', source=source, change_type=change_type, title=title, days=days, details_q=details_q, page=page+1) }}">Next ›</a>
+    <a href="{{ url_for('updates', source=source, change_type=change_type, title=title, days=days, details_q=details_q, page=total_pages) }}">»</a>
   {% endif %}
 </div>
 {% endif %}

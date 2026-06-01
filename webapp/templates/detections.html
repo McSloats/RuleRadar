@@ -75,10 +75,6 @@
   {% if details_q %} details matching <strong>{{ details_q }}</strong>{% endif %}
 </p>
 
-{# ── Shared filter args used for MITRE badge links and pagination ─────────── #}
-{% set pg_args = {'title': title, 'description': description, 'severity': severity,
-                  'source': source, 'days': days, 'details_q': details_q} %}
-
 {# ── Results table ────────────────────────────────────────────────────────── #}
 {% if rows %}
 <div class="table-wrap">
@@ -112,7 +108,7 @@
         <td onclick="event.stopPropagation()" class="mitre-cell">
           {% if row.mitre_techniques %}
             {% for tech in row.mitre_techniques.split('|') %}
-              <a href="{{ url_for('detections', **pg_args, mitre=tech) }}"
+              <a href="{{ url_for('detections', title=title, description=description, severity=severity, source=source, days=days, details_q=details_q, mitre=tech) }}"
                  class="badge badge-mitre"
                  title="Filter by {{ tech }}">{{ tech }}</a>
             {% endfor %}
@@ -160,14 +156,14 @@
             {% if row.mitre_techniques %}
               <span class="detail-label">Techniques</span>
               {% for tech in row.mitre_techniques.split('|') %}
-                <a href="{{ url_for('detections', **pg_args, mitre=tech) }}"
+                <a href="{{ url_for('detections', title=title, description=description, severity=severity, source=source, days=days, details_q=details_q, mitre=tech) }}"
                    class="badge badge-mitre">{{ tech }}</a>
               {% endfor %}
             {% endif %}
             {% if row.mitre_tactics %}
               <span class="detail-label" style="margin-left:0.75rem;">Tactics</span>
               {% for tac in row.mitre_tactics.split('|') %}
-                <a href="{{ url_for('detections', **pg_args, mitre=tac) }}"
+                <a href="{{ url_for('detections', title=title, description=description, severity=severity, source=source, days=days, details_q=details_q, mitre=tac) }}"
                    class="badge badge-tactic">{{ tac }}</a>
               {% endfor %}
             {% endif %}
@@ -225,16 +221,13 @@
 </div>
 
 {# ── Pagination ───────────────────────────────────────────────────────────── #}
-{# Redefine pg_args with mitre included for pagination links #}
-{% set pg_args = {'title': title, 'description': description, 'severity': severity,
-                  'source': source, 'mitre': mitre, 'days': days, 'details_q': details_q} %}
 {% if total_pages > 1 %}
 <div class="pagination">
   <span class="pg-info">Page {{ page }} of {{ total_pages }}</span>
 
   {% if page > 1 %}
-    <a href="{{ url_for('detections', **pg_args, page=1) }}">«</a>
-    <a href="{{ url_for('detections', **pg_args, page=page-1) }}">‹ Prev</a>
+    <a href="{{ url_for('detections', title=title, description=description, severity=severity, source=source, mitre=mitre, days=days, details_q=details_q, page=1) }}">«</a>
+    <a href="{{ url_for('detections', title=title, description=description, severity=severity, source=source, mitre=mitre, days=days, details_q=details_q, page=page-1) }}">‹ Prev</a>
   {% endif %}
 
   {% set start_pg = [1, page - 2] | max %}
@@ -243,13 +236,13 @@
     {% if p == page %}
       <span class="pg-current">{{ p }}</span>
     {% else %}
-      <a href="{{ url_for('detections', **pg_args, page=p) }}">{{ p }}</a>
+      <a href="{{ url_for('detections', title=title, description=description, severity=severity, source=source, mitre=mitre, days=days, details_q=details_q, page=p) }}">{{ p }}</a>
     {% endif %}
   {% endfor %}
 
   {% if page < total_pages %}
-    <a href="{{ url_for('detections', **pg_args, page=page+1) }}">Next ›</a>
-    <a href="{{ url_for('detections', **pg_args, page=total_pages) }}">»</a>
+    <a href="{{ url_for('detections', title=title, description=description, severity=severity, source=source, mitre=mitre, days=days, details_q=details_q, page=page+1) }}">Next ›</a>
+    <a href="{{ url_for('detections', title=title, description=description, severity=severity, source=source, mitre=mitre, days=days, details_q=details_q, page=total_pages) }}">»</a>
   {% endif %}
 </div>
 {% endif %}
