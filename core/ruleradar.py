@@ -266,20 +266,25 @@ def extract_sigma_mitre(meta: dict) -> tuple[str, str]:
 
 def extract_splunk_mitre(meta: dict) -> tuple[str, str]:
     """
-    Parse MITRE ATT&CK data from a Splunk security_content detection's 'tags' dict.
+    Parse MITRE ATT&CK data from a Splunk security_content detection.
 
-    Technique IDs live at tags.mitre_attack_id (list of strings, e.g. ['T1059', 'T1059.001']).
-    Tactics live inside tags.mitre_attack_enrichments[].mitre_attack_tactics (plural — current
-    security_content format) or mitre_attack_tactic (singular — older files). Both are handled.
+    Newer security_content files (post-2024 refactor) place mitre_attack_id and
+    mitre_attack_enrichments at the TOP LEVEL of the YAML document.  Older files
+    nested both fields inside a 'tags' dict.  Both formats are supported: the
+    top-level keys are checked first, with the tags dict as a fallback.
+
+    Technique IDs are a list of strings, e.g. ['T1059', 'T1059.001'].
+    A single rule can have multiple IDs; all are stored pipe-separated.
 
     Returns (pipe-joined techniques, pipe-joined tactic names).
     """
+    # Support both new (top-level) and old (under tags:) field locations
     tags = meta.get("tags") or {}
     if not isinstance(tags, dict):
-        return "", ""
+        tags = {}
 
     # ── Technique IDs ─────────────────────────────────────────────────────────
-    raw_ids = tags.get("mitre_attack_id") or []
+    raw_ids = meta.get("mitre_attack_id") or tags.get("mitre_attack_id") or []
     if isinstance(raw_ids, str):
         raw_ids = [raw_ids]
     seen_t: set[str] = set()
@@ -293,7 +298,11 @@ def extract_splunk_mitre(meta: dict) -> tuple[str, str]:
     # ── Tactics from enrichments ───────────────────────────────────────────────
     # Newer security_content uses "mitre_attack_tactics" (plural);
     # older files used "mitre_attack_tactic" (singular). Check both.
-    enrichments = tags.get("mitre_attack_enrichments") or []
+    enrichments = (
+        meta.get("mitre_attack_enrichments")
+        or tags.get("mitre_attack_enrichments")
+        or []
+    )
     seen_ta: set[str] = set()
     tactics: list[str] = []
     if isinstance(enrichments, list):
