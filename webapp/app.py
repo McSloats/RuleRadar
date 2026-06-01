@@ -57,7 +57,7 @@ from core import ruleradar
 
 from flask import (
     Flask, Response, abort, flash, jsonify, redirect,
-    render_template, request, url_for,
+    render_template, request, session, url_for,
 )
 from flask_login import (
     LoginManager, UserMixin, current_user,
@@ -421,16 +421,20 @@ def detections():
     page        = max(1, int(request.args.get("page", 1) or 1))
     per_page    = 50
 
-    rule_filter_rows = _get_user_rule_filters()
+    rule_filter_rows  = _get_user_rule_filters()
+    filter_active     = bool(session.get("filter_active_detections", False))
+    # Apply rule filter only when the user has explicitly enabled "My Rules"
+    active_filter     = rule_filter_rows if filter_active else None
+
     rows, total = db.search_detections(
         title=title, description=description,
         source=source, mitre=mitre, days=days, details_q=details_q,
         page=page, per_page=per_page,
-        user_filter_rows=rule_filter_rows or None,
+        user_filter_rows=active_filter or None,
     )
     total_pages = max(1, (total + per_page - 1) // per_page)
 
-    # Build set of rule_ids already in the filter for quick lookup in template
+    # Build set of rule_ids already in the filter for per-row button state
     filtered_rule_ids = {f["rule_id"] for f in rule_filter_rows if f.get("rule_id")}
 
     return render_template(
@@ -441,6 +445,7 @@ def detections():
         source=source, mitre=mitre, days=days, details_q=details_q,
         saved_filters=_get_saved_filters(),
         rule_filter_count=len(rule_filter_rows),
+        filter_active=filter_active,
         filtered_rule_ids=filtered_rule_ids,
     )
 
@@ -458,12 +463,15 @@ def updates():
     per_page    = 50
     offset      = (page - 1) * per_page
 
-    rule_filter_rows = _get_user_rule_filters()
+    rule_filter_rows  = _get_user_rule_filters()
+    filter_active     = bool(session.get("filter_active_updates", False))
+    active_filter     = rule_filter_rows if filter_active else None
+
     rows, total = db.get_updates(
         source=source, change_type=change_type,
         title=title, days=days, details_q=details_q,
         limit=per_page, offset=offset,
-        user_filter_rows=rule_filter_rows or None,
+        user_filter_rows=active_filter or None,
     )
     total_pages = max(1, (total + per_page - 1) // per_page)
 
@@ -475,7 +483,26 @@ def updates():
         title=title, days=days, details_q=details_q,
         saved_filters=_get_saved_filters(),
         rule_filter_count=len(rule_filter_rows),
+        filter_active=filter_active,
     )
+
+
+# ── View-mode toggle routes (All Rules ↔ My Rules, stored in session) ──────────
+
+@app.route("/detections/toggle-filter", methods=["POST"])
+@login_required
+def toggle_filter_detections():
+    """Set the Detections page to All Rules (state=0) or My Rules (state=1)."""
+    session["filter_active_detections"] = request.form.get("state") == "1"
+    return redirect(url_for("detections"))
+
+
+@app.route("/updates/toggle-filter", methods=["POST"])
+@login_required
+def toggle_filter_updates():
+    """Set the Updates page to All Rules (state=0) or My Rules (state=1)."""
+    session["filter_active_updates"] = request.form.get("state") == "1"
+    return redirect(url_for("updates"))
 
 
 # ── Rule filter routes ─────────────────────────────────────────────────────────

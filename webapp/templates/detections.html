@@ -99,12 +99,38 @@ function toggleFilterPanel() {
   {% if details_q %} details matching <strong>{{ details_q }}</strong>{% endif %}
 </p>
 
-{# ── Rule-filter indicator ────────────────────────────────────────────────── #}
-{% if rule_filter_count > 0 %}
+{# ── All Rules / My Rules toggle ─────────────────────────────────────────── #}
+<form method="post" action="{{ url_for('toggle_filter_detections') }}" class="view-toggle">
+  <button type="submit" name="state" value="0"
+          class="toggle-btn {% if not filter_active %}toggle-btn-active{% endif %}">
+    All Rules
+  </button>
+  {% if rule_filter_count > 0 %}
+  <button type="submit" name="state" value="1"
+          class="toggle-btn {% if filter_active %}toggle-btn-active{% endif %}">
+    My Rules ({{ rule_filter_count }})
+  </button>
+  {% else %}
+  <button type="button" class="toggle-btn toggle-btn-disabled" disabled
+          title="No filter list uploaded yet — go to Settings to add rules">
+    My Rules
+  </button>
+  {% endif %}
+</form>
+
+{# ── "My Rules" active banner ─────────────────────────────────────────────── #}
+{% if filter_active and rule_filter_count > 0 %}
 <div class="rule-filter-bar">
-  ⚡ Rule filter active — {{ rule_filter_count }} entr{{ 'ies' if rule_filter_count != 1 else 'y' }},
-  showing only matching results.
-  <a href="{{ url_for('rule_filter_page') }}" class="rule-filter-bar-link">Manage →</a>
+  Showing <strong>My Rules</strong>
+  ({{ rule_filter_count }} entr{{ 'ies' if rule_filter_count != 1 else 'y' }}).
+  <form method="post" action="{{ url_for('toggle_filter_detections') }}"
+        style="display:inline; margin:0;">
+    <input type="hidden" name="state" value="0">
+    <button type="submit" class="rule-filter-switch-btn">Switch to All Rules</button>
+  </form>
+  to see everything.
+  <a href="{{ url_for('rule_filter_page') }}" class="rule-filter-bar-link"
+     style="margin-left:0.25rem;">Manage →</a>
 </div>
 {% endif %}
 
@@ -301,12 +327,17 @@ function toggleFilterPanel() {
 {% else %}
 <div class="empty-state">
   <p>
-    {% if title or description or source or mitre or days or details_q or rule_filter_count %}
+    {% if title or description or source or mitre or days or details_q or filter_active %}
       No detections found matching your filters.
-      {% if rule_filter_count %}<br>
-        <a href="{{ url_for('rule_filter_page') }}" style="color:#d4a017;">
-          Manage rule filter ({{ rule_filter_count }} active entries) →
-        </a>
+      {% if filter_active %}<br>
+        <form method="post" action="{{ url_for('toggle_filter_detections') }}"
+              style="display:inline;">
+          <input type="hidden" name="state" value="0">
+          <button type="submit" class="rule-filter-switch-btn"
+                  style="font-size:0.85rem;">Switch to All Rules</button>
+        </form>
+        to see all detections, or
+        <a href="{{ url_for('rule_filter_page') }}" style="color:#d4a017;">manage your filter →</a>
       {% endif %}
     {% else %}
       No detections in the database yet.<br>The initial scan is running in the background — check back shortly.

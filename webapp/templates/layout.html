@@ -232,14 +232,43 @@
       border-radius: 8px;
     }
 
-    /* ── Rule-filter active indicator bar ── */
+    /* ── All Rules / My Rules view toggle ── */
+    .view-toggle {
+      display: inline-flex;
+      border: 1px solid #2b1e4a;
+      border-radius: 6px;
+      overflow: hidden;
+      margin-bottom: 0.75rem;
+    }
+    .toggle-btn {
+      padding: 0.35rem 0.9rem;
+      font-size: 0.82rem;
+      border: none;
+      border-right: 1px solid #2b1e4a;
+      background: #0d0a18;
+      color: #6a5888;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.12s, color 0.12s;
+    }
+    .toggle-btn:last-child { border-right: none; }
+    .toggle-btn:hover:not(:disabled) { background: #1e1040; color: #c4b5fd; }
+    .toggle-btn-active { background: #2b1e4a; color: #ede8f5; font-weight: 600; }
+    .toggle-btn-disabled { color: #3d2d5a; cursor: not-allowed; opacity: 0.5; }
+
+    /* ── "My Rules" active indicator banner ── */
     .rule-filter-bar {
       background: #1a1040; border: 1px solid #4a3d78; border-radius: 6px;
       padding: 0.5rem 0.85rem; font-size: 0.82rem; color: #c4b5fd;
       margin-bottom: 0.75rem;
-      display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+      display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
     }
     .rule-filter-bar-link { color: #d4a017; font-weight: 600; }
+    .rule-filter-switch-btn {
+      background: none; border: none; padding: 0; cursor: pointer;
+      color: #d4a017; font-weight: 600; font-size: inherit; font-family: inherit;
+    }
+    .rule-filter-switch-btn:hover { text-decoration: underline; }
 
     /* ── Filter toggle bar (Detections / Updates pages) ── */
     .filter-bar          { margin-bottom: 1rem; }
