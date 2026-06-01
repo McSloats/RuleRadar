@@ -170,9 +170,13 @@ def parse_yaml(text: str) -> dict:
     if YAML_AVAILABLE and text:
         try:
             return yaml.safe_load(text) or {}
-        except Exception:
-            pass
-    # Minimal fallback: parse top-level key: value lines only
+        except Exception as _yaml_err:
+            # Log so operators can see which files trigger parse failures
+            print(f"  [parse_yaml] yaml.safe_load failed ({_yaml_err!r}); "
+                  "falling back to line parser", file=sys.stderr)
+    # Minimal fallback: parse top-level key: value lines only.
+    # NOTE: this cannot parse nested structures like 'tags', so any rule
+    # that reaches this path will have empty MITRE / tags data.
     result = {}
     for line in (text or "").splitlines():
         if ":" in line and not line.startswith((" ", "\t")):
@@ -747,6 +751,73 @@ def _process_elastic(source: str, rel_path: str, text: str, rule_url: str) -> tu
         rule_date=rule_date, refs=refs, rule_id=rule_id,
     )
     return is_new, title
+
+
+# ── TTP backfill ──────────────────────────────────────────────────────────────
+
+def backfill_splunk_ttps() -> dict:
+    """
+    Re-parse YAML files for every Splunk detection that currently has an empty
+    mitre_techniques field and write the correct TTP data to the database.
+
+    This is needed after deploying the mitre_attack_tactics (plural) parser fix,
+    because existing rows were indexed before the fix and sync_repo only
+    re-processes files that changed in git — unchanged files never got updated.
+
+    Returns {"examined": N, "updated": N, "errors": N, "skipped_no_repo": N}.
+    """
+    all_repos     = db.get_all_repos()
+    splunk_repos  = [r for r in all_repos
+                     if r.get("parser") == "splunk" and r.get("local_path")]
+
+    examined = updated = errors = skipped = 0
+
+    for repo in splunk_repos:
+        local = Path(repo["local_path"])
+        if not local.exists():
+            print(
+                f"  [backfill] {repo['name']}: local clone not found at {local} — skip",
+                file=sys.stderr,
+            )
+            skipped += 1
+            continue
+
+        missing = db.get_detections_missing_ttps(repo["name"])
+        print(
+            f"  [backfill] {repo['name']}: {len(missing)} detections with empty TTPs",
+            flush=True,
+        )
+
+        for row in missing:
+            examined += 1
+            full = local / row["file_path"]
+            if not full.exists():
+                print(f"  [backfill]   missing file: {row['file_path']}", file=sys.stderr)
+                errors += 1
+                continue
+            try:
+                text       = full.read_text(encoding="utf-8", errors="replace")
+                meta       = parse_yaml(text)
+                techniques, tactics = extract_splunk_mitre(meta)
+                if techniques or tactics:
+                    db.update_detection_ttps(row["id"], techniques, tactics)
+                    updated += 1
+                # If still empty: file genuinely has no MITRE mapping; not an error
+            except Exception as e:
+                print(f"  [backfill]   error on {row['file_path']}: {e}", file=sys.stderr)
+                errors += 1
+
+    print(
+        f"  [backfill] done — examined={examined}, updated={updated}, "
+        f"errors={errors}, skipped_repos={skipped}",
+        flush=True,
+    )
+    return {
+        "examined":         examined,
+        "updated":          updated,
+        "errors":           errors,
+        "skipped_no_repo":  skipped,
+    }
 
 
 # ── Repository operations ──────────────────────────────────────────────────────

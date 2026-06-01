@@ -1109,6 +1109,36 @@ def admin_activity():
     )
 
 
+# ── Maintenance ────────────────────────────────────────────────────────────────
+
+@app.route("/admin/backfill-ttps", methods=["POST"])
+@admin_required
+def admin_backfill_ttps():
+    """
+    Re-parse Splunk YAML files to backfill mitre_techniques / mitre_tactics for
+    detections that have empty TTP data from before the parser fix was deployed.
+    Runs synchronously (may take a few seconds for large repos).
+    """
+    result = ruleradar.backfill_splunk_ttps()
+    msg = (
+        f"TTP backfill complete — "
+        f"{result['examined']} rules examined, "
+        f"{result['updated']} updated with TTP data, "
+        f"{result['errors']} read errors"
+        + (f", {result['skipped_no_repo']} repo(s) not cloned yet"
+           if result['skipped_no_repo'] else "")
+        + "."
+    )
+    flash(msg, "success" if result["errors"] == 0 else "warning")
+    db.log_activity(
+        "admin", "Splunk TTP backfill run",
+        actor=current_user.username,
+        detail=f"examined={result['examined']}, updated={result['updated']}, "
+               f"errors={result['errors']}",
+    )
+    return redirect(url_for("admin"))
+
+
 # ── Health check ───────────────────────────────────────────────────────────────
 
 @app.route("/health")

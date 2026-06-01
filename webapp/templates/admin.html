@@ -296,6 +296,32 @@
   </form>
 </div>
 
+{# ═══ Maintenance ═════════════════════════════════════════════════════════════ #}
+<div class="card">
+  <div class="card-title">🔧 Maintenance</div>
+
+  <div style="display:flex; flex-wrap:wrap; gap:1.25rem; align-items:flex-start;">
+
+    <div style="max-width:440px;">
+      <p style="font-size:0.85rem; font-weight:600; margin-bottom:0.3rem;">
+        Backfill Splunk MITRE TTPs
+      </p>
+      <p class="text-muted text-small" style="margin-bottom:0.75rem;">
+        Re-reads every locally cloned Splunk detection file that currently has
+        empty MITRE TTP data and writes the correct technique / tactic values.
+        Use this after a parser fix, or if Splunk rules show no TTPs on the
+        Detections page. Runs in the request — may take a few seconds.
+      </p>
+      <form method="post" action="{{ url_for('admin_backfill_ttps') }}">
+        <button type="submit" class="btn btn-secondary">
+          Run Splunk TTP Backfill
+        </button>
+      </form>
+    </div>
+
+  </div>
+</div>
+
 <style>
 /* ── Repo status badges ─────────────────────────────────────────────────── */
 .badge-repo-pending   { background: #2b1e4a; color: #c4b5fd; }
