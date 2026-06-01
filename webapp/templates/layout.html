@@ -232,11 +232,30 @@
       border-radius: 8px;
     }
 
-    /* ── Multi-row filter form (Detections / Updates pages) ── */
-    .filter-form-multi { display:flex; flex-direction:column; gap:0.5rem; margin-bottom:1rem; }
-    .filter-row { display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; }
-    .filter-row input[type="text"] { flex:1; min-width:130px; }
-    .filter-row select { min-width:130px; }
+    /* ── Filter toggle bar (Detections / Updates pages) ── */
+    .filter-bar          { margin-bottom: 1rem; }
+    .filter-bar-main     { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+    .filter-search-input { flex: 1; min-width: 220px; }
+
+    .filter-toggle-btn   { display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
+    .filter-badge        {
+      background: #d4a017; color: #0d0a18;
+      border-radius: 10px; padding: 0.05rem 0.4rem;
+      font-size: 0.68rem; font-weight: 700; line-height: 1.5;
+    }
+
+    .filter-panel        {
+      display: none;
+      margin-top: 0.5rem; padding: 0.75rem 1rem;
+      background: #160f2a; border: 1px solid #2b1e4a; border-radius: 6px;
+    }
+    .filter-panel.open   { display: block; }
+    .filter-panel-grid   { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: flex-end; }
+    .filter-panel-field  { display: flex; flex-direction: column; gap: 0.2rem; min-width: 120px; }
+    .filter-panel-field label {
+      font-size: 0.72rem; font-weight: 600; color: #9080b8;
+      text-transform: uppercase; letter-spacing: 0.04em;
+    }
 
     /* ── Saved filter presets ── */
     .filter-presets {

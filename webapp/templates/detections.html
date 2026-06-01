@@ -21,48 +21,84 @@
 </div>
 {% endif %}
 
-{# ── Filter form ──────────────────────────────────────────────────────────── #}
-<form method="get" action="{{ url_for('detections') }}" class="filter-form-multi">
-  {# Row 1 — one filter per main table column #}
-  <div class="filter-row">
+{# ── Filter bar ───────────────────────────────────────────────────────────── #}
+{% set _panel_active = severity or source or mitre or description or days or details_q %}
+{% set _panel_count  = (1 if severity else 0) + (1 if source else 0) + (1 if mitre else 0)
+                     + (1 if description else 0) + (1 if days else 0) + (1 if details_q else 0) %}
+<form method="get" action="{{ url_for('detections') }}" class="filter-bar">
+
+  {# Main row: title search + toggle + actions #}
+  <div class="filter-bar-main">
     <input type="text" name="title" value="{{ title }}"
-           placeholder="Title…" style="flex:2; min-width:160px;">
-    <select name="severity">
-      <option value=""              {% if not severity                  %}selected{% endif %}>All Severities</option>
-      <option value="critical"      {% if severity == 'critical'        %}selected{% endif %}>Critical</option>
-      <option value="high"          {% if severity == 'high'            %}selected{% endif %}>High</option>
-      <option value="medium"        {% if severity == 'medium'          %}selected{% endif %}>Medium</option>
-      <option value="low"           {% if severity == 'low'             %}selected{% endif %}>Low</option>
-      <option value="informational" {% if severity == 'informational'   %}selected{% endif %}>Informational</option>
-    </select>
-    <select name="source">
-      <option value=""        {% if not source           %}selected{% endif %}>All Sources</option>
-      <option value="sigma"   {% if source == 'sigma'    %}selected{% endif %}>Sigma</option>
-      <option value="splunk"  {% if source == 'splunk'   %}selected{% endif %}>Splunk</option>
-      <option value="elastic" {% if source == 'elastic'  %}selected{% endif %}>Elastic</option>
-    </select>
-    <input type="text" name="mitre" value="{{ mitre }}"
-           placeholder="MITRE (e.g. T1059, Execution)" style="min-width:180px;">
-    <input type="text" name="description" value="{{ description }}"
-           placeholder="Description…" style="flex:2; min-width:160px;">
-    <select name="days">
-      <option value=""   {% if not days      %}selected{% endif %}>Any time</option>
-      <option value="7"  {% if days == '7'   %}selected{% endif %}>Last 7 days</option>
-      <option value="30" {% if days == '30'  %}selected{% endif %}>Last 30 days</option>
-      <option value="90" {% if days == '90'  %}selected{% endif %}>Last 90 days</option>
-    </select>
-  </div>
-  {# Row 2 — keyword search across all expanded-detail fields #}
-  <div class="filter-row">
-    <input type="text" name="details_q" value="{{ details_q }}"
-           placeholder="Details search — logic, SPL, author, status, refs…"
-           style="flex:1; min-width:260px;">
+           placeholder="Search by title…" class="filter-search-input">
+    <button type="button" class="btn btn-secondary filter-toggle-btn"
+            id="filter-toggle" onclick="toggleFilterPanel()"
+            aria-expanded="{{ 'true' if _panel_active else 'false' }}">
+      ⚙ Filters{% if _panel_count %} <span class="filter-badge">{{ _panel_count }}</span>{% endif %}
+    </button>
     <button type="submit" class="btn btn-primary">Search</button>
-    {% if title or description or severity or source or mitre or days or details_q %}
+    {% if title or _panel_active %}
       <a href="{{ url_for('detections') }}" class="btn btn-secondary">Clear</a>
     {% endif %}
   </div>
+
+  {# Expandable panel — auto-opens when any panel filter is active #}
+  <div class="filter-panel{% if _panel_active %} open{% endif %}" id="filter-panel">
+    <div class="filter-panel-grid">
+      <div class="filter-panel-field">
+        <label>Severity</label>
+        <select name="severity">
+          <option value=""              {% if not severity                %}selected{% endif %}>Any</option>
+          <option value="critical"      {% if severity == 'critical'      %}selected{% endif %}>Critical</option>
+          <option value="high"          {% if severity == 'high'          %}selected{% endif %}>High</option>
+          <option value="medium"        {% if severity == 'medium'        %}selected{% endif %}>Medium</option>
+          <option value="low"           {% if severity == 'low'           %}selected{% endif %}>Low</option>
+          <option value="informational" {% if severity == 'informational' %}selected{% endif %}>Informational</option>
+        </select>
+      </div>
+      <div class="filter-panel-field">
+        <label>Source</label>
+        <select name="source">
+          <option value=""        {% if not source          %}selected{% endif %}>All</option>
+          <option value="sigma"   {% if source == 'sigma'   %}selected{% endif %}>Sigma</option>
+          <option value="splunk"  {% if source == 'splunk'  %}selected{% endif %}>Splunk</option>
+          <option value="elastic" {% if source == 'elastic' %}selected{% endif %}>Elastic</option>
+        </select>
+      </div>
+      <div class="filter-panel-field" style="flex:1.2; min-width:150px;">
+        <label>MITRE TTP</label>
+        <input type="text" name="mitre" value="{{ mitre }}" placeholder="e.g. T1059, Execution">
+      </div>
+      <div class="filter-panel-field" style="flex:2; min-width:180px;">
+        <label>Description</label>
+        <input type="text" name="description" value="{{ description }}" placeholder="Keyword…">
+      </div>
+      <div class="filter-panel-field">
+        <label>Time window</label>
+        <select name="days">
+          <option value=""   {% if not days      %}selected{% endif %}>Any time</option>
+          <option value="7"  {% if days == '7'   %}selected{% endif %}>Last 7 days</option>
+          <option value="30" {% if days == '30'  %}selected{% endif %}>Last 30 days</option>
+          <option value="90" {% if days == '90'  %}selected{% endif %}>Last 90 days</option>
+        </select>
+      </div>
+      <div class="filter-panel-field" style="flex:2; min-width:200px;">
+        <label>Details search</label>
+        <input type="text" name="details_q" value="{{ details_q }}"
+               placeholder="Logic, SPL, author, refs…">
+      </div>
+    </div>
+  </div>
+
 </form>
+<script>
+function toggleFilterPanel() {
+  const panel = document.getElementById('filter-panel');
+  const btn   = document.getElementById('filter-toggle');
+  const open  = panel.classList.toggle('open');
+  btn.setAttribute('aria-expanded', open);
+}
+</script>
 
 <p class="result-count">
   {{ total }} detection{{ 's' if total != 1 else '' }}
