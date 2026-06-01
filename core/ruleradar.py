@@ -113,6 +113,36 @@ AVAILABLE_REPOS: dict[str, dict] = {
         "paths":        ["rules/"],
         "parser":       "elastic",
     },
+    "panther": {
+        "name":         "panther",
+        "display_name": "Panther Labs / panther-analysis",
+        "description":  "Panther community detection rules for cloud and SaaS platforms (1,000+ rules)",
+        "owner":        "panther-labs",
+        "repo":         "panther-analysis",
+        "branch":       "develop",
+        "paths":        ["rules/"],
+        "parser":       "panther",
+    },
+    "sublime": {
+        "name":         "sublime",
+        "display_name": "Sublime Security / sublime-rules",
+        "description":  "Sublime Security email detection rules in MQL (600+ rules)",
+        "owner":        "sublime-security",
+        "repo":         "sublime-rules",
+        "branch":       "main",
+        "paths":        ["detection-rules/"],
+        "parser":       "sublime",
+    },
+    "anvilogic": {
+        "name":         "anvilogic",
+        "display_name": "Anvilogic / armory",
+        "description":  "Anvilogic Armory detection rules for Splunk and Snowflake (1,000+ detections)",
+        "owner":        "anvilogic-forge",
+        "repo":         "armory",
+        "branch":       "main",
+        "paths":        ["detections/"],
+        "parser":       "anvilogic",
+    },
 }
 
 # ── MITRE ATT&CK tactic slug → display name ───────────────────────────────────
@@ -131,6 +161,25 @@ MITRE_TACTICS: dict[str, str] = {
     "impact":                "Impact",
     "reconnaissance":        "Reconnaissance",
     "resource_development":  "Resource Development",
+}
+
+# MITRE ATT&CK tactic ID (TA####) → display name
+# Used by the Panther parser which stores tactic IDs rather than slugs.
+MITRE_TACTIC_IDS: dict[str, str] = {
+    "TA0001": "Initial Access",
+    "TA0002": "Execution",
+    "TA0003": "Persistence",
+    "TA0004": "Privilege Escalation",
+    "TA0005": "Defense Evasion",
+    "TA0006": "Credential Access",
+    "TA0007": "Discovery",
+    "TA0008": "Lateral Movement",
+    "TA0009": "Collection",
+    "TA0010": "Exfiltration",
+    "TA0011": "Command and Control",
+    "TA0040": "Impact",
+    "TA0042": "Resource Development",
+    "TA0043": "Reconnaissance",
 }
 
 # Regex matching a MITRE technique ID: t1234 or t1234.567
@@ -372,6 +421,91 @@ def extract_elastic_mitre(rule: dict) -> tuple[str, str]:
                 if sid and sid not in seen_t:
                     seen_t.add(sid)
                     techniques.append(sid)
+
+    return "|".join(techniques), "|".join(tactics)
+
+
+def extract_panther_mitre(meta: dict) -> tuple[str, str]:
+    """
+    Parse MITRE ATT&CK data from a Panther rule's Reports section.
+
+    Reports.MITRE ATT&CK entries use the format "TA0005:T1562" where
+    TA#### is the tactic ID and T#### is the technique ID.
+
+    Returns (pipe-joined techniques, pipe-joined tactic names).
+    """
+    reports = meta.get("Reports") or {}
+    mitre_entries: list = []
+    if isinstance(reports, dict):
+        mitre_entries = reports.get("MITRE ATT&CK") or []
+    if not isinstance(mitre_entries, list):
+        mitre_entries = []
+
+    seen_t:  set[str] = set()
+    seen_ta: set[str] = set()
+    techniques: list[str] = []
+    tactics:    list[str] = []
+
+    for entry in mitre_entries:
+        # Expected format: "TA0005:T1562" or "TA0005:T1562.001"
+        parts = str(entry).split(":")
+        if len(parts) >= 2:
+            tactic_id    = parts[0].strip().upper()
+            technique_id = parts[1].strip().upper()
+            if technique_id and technique_id not in seen_t:
+                seen_t.add(technique_id)
+                techniques.append(technique_id)
+            tactic_name = MITRE_TACTIC_IDS.get(tactic_id, "")
+            if tactic_name and tactic_name not in seen_ta:
+                seen_ta.add(tactic_name)
+                tactics.append(tactic_name)
+
+    return "|".join(techniques), "|".join(tactics)
+
+
+def extract_anvilogic_mitre(meta: dict) -> tuple[str, str]:
+    """
+    Parse MITRE ATT&CK data from an Anvilogic Armory detection YAML.
+
+    technique_id: list of standard T-numbers, e.g. ["T1218", "T1204.002"]
+    techniques:   list of tactic:technique slugs, e.g.
+                  ["defense-evasion:system binary proxy execution",
+                   "execution:user execution:malicious file"]
+    Tactics are extracted from the segment before the first ":" in each
+    techniques entry, then looked up (or title-cased as a fallback).
+
+    Returns (pipe-joined techniques, pipe-joined tactic names).
+    """
+    raw_ids = meta.get("technique_id") or []
+    if isinstance(raw_ids, str):
+        raw_ids = [raw_ids]
+
+    seen_t: set[str] = set()
+    techniques: list[str] = []
+    for t in raw_ids:
+        uid = str(t).strip().upper()
+        if uid and uid not in seen_t:
+            seen_t.add(uid)
+            techniques.append(uid)
+
+    raw_tactics = meta.get("techniques") or []
+    if isinstance(raw_tactics, str):
+        raw_tactics = [raw_tactics]
+
+    seen_ta: set[str] = set()
+    tactics: list[str] = []
+    for entry in raw_tactics:
+        # First segment before ":" is the tactic slug (hyphenated, lower-case)
+        slug = str(entry).split(":")[0].strip().lower()
+        if not slug:
+            continue
+        # Look up in MITRE_TACTICS (uses underscores), fall back to title-case
+        tactic_name = MITRE_TACTICS.get(slug.replace("-", "_"), "")
+        if not tactic_name:
+            tactic_name = slug.replace("-", " ").title()
+        if tactic_name and tactic_name not in seen_ta:
+            seen_ta.add(tactic_name)
+            tactics.append(tactic_name)
 
     return "|".join(techniques), "|".join(tactics)
 
@@ -762,6 +896,147 @@ def _process_elastic(source: str, rel_path: str, text: str, rule_url: str) -> tu
     return is_new, title
 
 
+def _process_panther(source: str, rel_path: str, text: str, rule_url: str) -> tuple[bool, str] | None:
+    """
+    Parse a Panther Labs panther-analysis rule YAML and upsert it into the DB.
+    Returns (is_new, title), or None if the file is not a rule (e.g. policy,
+    scheduled_rule, data_model) and should be skipped entirely.
+
+    Key fields:
+      AnalysisType  — "rule" | "policy" | "scheduled_rule" | etc. (skip non-rule)
+      DisplayName   — human-readable rule title
+      RuleID        — unique string identifier
+      Description   — what the rule detects
+      Severity      — Info | Low | Medium | High | Critical
+      Reference     — single URL string (not a list)
+      Reports.MITRE ATT&CK — list of "TA####:T####" entries
+
+    Detection logic is Python (in a separate .py file referenced by Filename)
+    and is not stored inline.
+    """
+    meta = parse_yaml(text)
+
+    # Only index rule-type files; skip policies, global helpers, data models, etc.
+    analysis_type = str(meta.get("AnalysisType", "")).strip().lower()
+    if analysis_type and analysis_type != "rule":
+        return None
+
+    title       = str(meta.get("DisplayName", "")).strip() or clean_title_fallback(rel_path)
+    description = str(meta.get("Description", ""))[:350]
+    rule_id     = str(meta.get("RuleID",      ""))[:64]
+    rule_status = str(meta.get("Severity",    ""))[:50]
+
+    # Panther uses "Reference" (singular) for a single URL, unlike most repos
+    ref_raw = meta.get("Reference") or meta.get("References") or ""
+    if isinstance(ref_raw, list):
+        refs = "\n".join(str(r) for r in ref_raw)[:500]
+    else:
+        refs = str(ref_raw)[:500]
+
+    techniques, tactics = extract_panther_mitre(meta)
+
+    is_new = db.upsert_detection(
+        source, rel_path, title, description, "", "", rule_url,
+        mitre_techniques=techniques, mitre_tactics=tactics,
+        author="", rule_status=rule_status,
+        rule_date="", refs=refs, rule_id=rule_id,
+    )
+    return is_new, title
+
+
+def _process_sublime(source: str, rel_path: str, text: str, rule_url: str) -> tuple[bool, str]:
+    """
+    Parse a Sublime Security sublime-rules YAML and upsert it into the DB.
+
+    Key fields:
+      name                 — rule title
+      id                   — UUID
+      description          — what the rule detects
+      severity             — low | medium | high | critical
+      source               — MQL (Message Query Language) detection logic
+      tactics_and_techniques — Sublime's own classification (not standard MITRE T-numbers)
+
+    Sublime rules are email-focused and use MQL; no MITRE technique IDs are
+    present.  tactics_and_techniques is stored as mitre_tactics for display.
+    """
+    meta = parse_yaml(text)
+
+    title       = str(meta.get("name",        "")).strip() or clean_title_fallback(rel_path)
+    description = str(meta.get("description", ""))[:350]
+    rule_id     = str(meta.get("id",          ""))[:64]
+    rule_status = str(meta.get("severity",    ""))[:50]
+
+    # MQL detection logic stored in the 'source' field
+    logic = str(meta.get("source", "")).strip()[:600]
+
+    # Sublime uses its own tactic/technique taxonomy — store as mitre_tactics
+    tac_raw = meta.get("tactics_and_techniques") or []
+    if isinstance(tac_raw, str):
+        tac_raw = [tac_raw]
+    tactics = "|".join(str(t).strip() for t in tac_raw if str(t).strip())
+
+    is_new = db.upsert_detection(
+        source, rel_path, title, description, logic, "", rule_url,
+        mitre_techniques="", mitre_tactics=tactics,
+        author="", rule_status=rule_status,
+        rule_date="", refs="", rule_id=rule_id,
+    )
+    return is_new, title
+
+
+def _process_anvilogic(source: str, rel_path: str, text: str, rule_url: str) -> tuple[bool, str]:
+    """
+    Parse an Anvilogic Armory detection YAML and upsert it into the DB.
+
+    Armory detections live inside per-detection directories; each YAML is one
+    platform variant (Splunk SPL, Snowflake SQL, etc.).
+
+    Key fields:
+      title        — human-readable rule title
+      id           — numeric string identifier
+      description  — what the rule detects
+      logic_format — "Splunk" | "snowflake" | other (case may vary)
+      logic        — the actual query string
+      technique_id — list of standard MITRE T-numbers
+      techniques   — list of "tactic:sub:technique" slugs (tactic before first ":")
+      references   — list of URLs
+    """
+    meta = parse_yaml(text)
+
+    title       = str(meta.get("title",       "")).strip() or clean_title_fallback(rel_path)
+    description = str(meta.get("description", ""))[:350]
+    rule_id     = str(meta.get("id",          ""))[:64]
+
+    refs_raw = meta.get("references") or []
+    refs = (
+        "\n".join(str(r) for r in refs_raw)
+        if isinstance(refs_raw, list) else str(refs_raw)
+    )[:500]
+
+    logic_raw    = str(meta.get("logic",        "")).strip()
+    logic_format = str(meta.get("logic_format", "")).strip()
+
+    # For Splunk queries store in spl (mirrors how the native Splunk repo works);
+    # for other formats prefix the logic block with its language label.
+    if logic_format.lower() == "splunk":
+        detection_logic = ""
+        spl = logic_raw[:500]
+    else:
+        label = f"[{logic_format}]\n" if logic_format else ""
+        detection_logic = (label + logic_raw)[:600]
+        spl = ""
+
+    techniques, tactics = extract_anvilogic_mitre(meta)
+
+    is_new = db.upsert_detection(
+        source, rel_path, title, description, detection_logic, spl, rule_url,
+        mitre_techniques=techniques, mitre_tactics=tactics,
+        author="", rule_status="",
+        rule_date="", refs=refs, rule_id=rule_id,
+    )
+    return is_new, title
+
+
 # ── TTP backfill ──────────────────────────────────────────────────────────────
 
 def backfill_splunk_ttps() -> dict:
@@ -928,13 +1203,34 @@ def index_repo(repo_cfg: dict) -> int:
                     continue
 
                 try:
+                    # Panther YAML files that are not rule type (policy, data_model,
+                    # scheduled_rule, global) are skipped before parsing.
+                    if parser == "panther":
+                        _at_line = next(
+                            (l for l in text.splitlines()[:20]
+                             if l.startswith("AnalysisType:")), ""
+                        )
+                        if _at_line:
+                            _at_val = _at_line.partition(":")[2].strip().strip("'\"").lower()
+                            if _at_val and _at_val != "rule":
+                                continue
+
+                    result = None
                     if parser == "sigma":
-                        _process_sigma(name, rel, text, rule_url)
+                        result = _process_sigma(name, rel, text, rule_url)
                     elif parser == "elastic":
-                        _process_elastic(name, rel, text, rule_url)
+                        result = _process_elastic(name, rel, text, rule_url)
+                    elif parser == "panther":
+                        result = _process_panther(name, rel, text, rule_url)
+                    elif parser == "sublime":
+                        result = _process_sublime(name, rel, text, rule_url)
+                    elif parser == "anvilogic":
+                        result = _process_anvilogic(name, rel, text, rule_url)
                     else:
-                        _process_splunk(name, rel, text, rule_url)
-                    indexed += 1
+                        result = _process_splunk(name, rel, text, rule_url)
+
+                    if result is not None:
+                        indexed += 1
                 except Exception as e:
                     print(f"  [{name}] Parse error {rel}: {e}", file=sys.stderr)
 
@@ -1063,11 +1359,32 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int]:
                 continue
 
             rule_url = f"https://github.com/{owner}/{repo}/blob/{branch}/{target_fp}"
+
+            # Skip non-rule Panther files before parsing
+            if parser == "panther":
+                _at_line = next(
+                    (l for l in text.splitlines()[:20]
+                     if l.startswith("AnalysisType:")), ""
+                )
+                if _at_line:
+                    _at_val = _at_line.partition(":")[2].strip().strip("'\"").lower()
+                    if _at_val and _at_val != "rule":
+                        continue
+
             try:
                 if parser == "sigma":
                     is_new, title = _process_sigma(name, target_fp, text, rule_url)
                 elif parser == "elastic":
                     is_new, title = _process_elastic(name, target_fp, text, rule_url)
+                elif parser == "panther":
+                    result = _process_panther(name, target_fp, text, rule_url)
+                    if result is None:
+                        continue
+                    is_new, title = result
+                elif parser == "sublime":
+                    is_new, title = _process_sublime(name, target_fp, text, rule_url)
+                elif parser == "anvilogic":
+                    is_new, title = _process_anvilogic(name, target_fp, text, rule_url)
                 else:
                     is_new, title = _process_splunk(name, target_fp, text, rule_url)
             except Exception as e:
@@ -1100,6 +1417,24 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int]:
                 except Exception:
                     logic   = ""
                     spl_val = ""
+            elif parser == "sublime":
+                _meta   = parse_yaml(text)
+                logic   = str(_meta.get("source", "")).strip()[:600]
+                spl_val = ""
+            elif parser == "anvilogic":
+                _meta  = parse_yaml(text)
+                _lraw  = str(_meta.get("logic", "")).strip()
+                _lfmt  = str(_meta.get("logic_format", "")).strip()
+                if _lfmt.lower() == "splunk":
+                    logic   = ""
+                    spl_val = _lraw[:500]
+                else:
+                    _lbl    = f"[{_lfmt}]\n" if _lfmt else ""
+                    logic   = (_lbl + _lraw)[:600]
+                    spl_val = ""
+            elif parser == "panther":
+                logic   = ""
+                spl_val = ""
             else:
                 meta    = parse_yaml(text)
                 logic   = ""

@@ -85,10 +85,13 @@
       <div class="filter-panel-field">
         <label>Source</label>
         <select name="source">
-          <option value=""        {% if not source          %}selected{% endif %}>All</option>
-          <option value="sigma"   {% if source == 'sigma'   %}selected{% endif %}>Sigma</option>
-          <option value="splunk"  {% if source == 'splunk'  %}selected{% endif %}>Splunk</option>
-          <option value="elastic" {% if source == 'elastic' %}selected{% endif %}>Elastic</option>
+          <option value=""           {% if not source              %}selected{% endif %}>All</option>
+          <option value="sigma"      {% if source == 'sigma'       %}selected{% endif %}>Sigma</option>
+          <option value="splunk"     {% if source == 'splunk'      %}selected{% endif %}>Splunk</option>
+          <option value="elastic"    {% if source == 'elastic'     %}selected{% endif %}>Elastic</option>
+          <option value="panther"    {% if source == 'panther'     %}selected{% endif %}>Panther</option>
+          <option value="sublime"    {% if source == 'sublime'     %}selected{% endif %}>Sublime</option>
+          <option value="anvilogic"  {% if source == 'anvilogic'   %}selected{% endif %}>Anvilogic</option>
         </select>
       </div>
       <div class="filter-panel-field">

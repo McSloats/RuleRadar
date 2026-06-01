@@ -32,7 +32,7 @@
 
     {# Header: source badge + name + status dot #}
     <div class="dash-card-header">
-      <span class="badge {% if repo.name in ['sigma', 'splunk', 'elastic'] %}badge-{{ repo.name }}{% else %}badge-system{% endif %}">
+      <span class="badge {% if repo.name in ['sigma', 'splunk', 'elastic', 'panther', 'sublime', 'anvilogic'] %}badge-{{ repo.name }}{% else %}badge-system{% endif %}">
         {{ repo.name }}
       </span>
       <span class="dash-card-title">{{ repo.display_name }}</span>
