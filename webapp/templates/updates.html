@@ -23,6 +23,7 @@
 
 {# ── All Rules / My Rules toggle ─────────────────────────────────────────── #}
 <form method="post" action="{{ url_for('toggle_filter_updates') }}" class="view-toggle">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <button type="submit" name="state" value="0"
           class="toggle-btn {% if not filter_active %}toggle-btn-active{% endif %}">
     All Rules
@@ -47,6 +48,7 @@
   ({{ rule_filter_count }} entr{{ 'ies' if rule_filter_count != 1 else 'y' }}).
   <form method="post" action="{{ url_for('toggle_filter_updates') }}"
         style="display:inline; margin:0;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="state" value="0">
     <button type="submit" class="rule-filter-switch-btn">Switch to All Rules</button>
   </form>
@@ -280,6 +282,7 @@ function toggleFilterPanel() {
       {% if filter_active %}<br>
         <form method="post" action="{{ url_for('toggle_filter_updates') }}"
               style="display:inline;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="state" value="0">
           <button type="submit" class="rule-filter-switch-btn"
                   style="font-size:0.85rem;">Switch to All Rules</button>

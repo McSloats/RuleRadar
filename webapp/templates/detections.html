@@ -101,6 +101,7 @@ function toggleFilterPanel() {
 
 {# ── All Rules / My Rules toggle ─────────────────────────────────────────── #}
 <form method="post" action="{{ url_for('toggle_filter_detections') }}" class="view-toggle">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <button type="submit" name="state" value="0"
           class="toggle-btn {% if not filter_active %}toggle-btn-active{% endif %}">
     All Rules
@@ -125,6 +126,7 @@ function toggleFilterPanel() {
   ({{ rule_filter_count }} entr{{ 'ies' if rule_filter_count != 1 else 'y' }}).
   <form method="post" action="{{ url_for('toggle_filter_detections') }}"
         style="display:inline; margin:0;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="state" value="0">
     <button type="submit" class="rule-filter-switch-btn">Switch to All Rules</button>
   </form>
@@ -332,6 +334,7 @@ function toggleFilterPanel() {
       {% if filter_active %}<br>
         <form method="post" action="{{ url_for('toggle_filter_detections') }}"
               style="display:inline;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="state" value="0">
           <button type="submit" class="rule-filter-switch-btn"
                   style="font-size:0.85rem;">Switch to All Rules</button>
@@ -409,13 +412,15 @@ function clearSelection() {
   updateBulkBar();
 }
 
+const _csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
 /* ── Per-row add-to-filter ─────────────────────────────────────────────── */
 async function addToFilter(btn, ruleId, title, source) {
   btn.disabled = true;
   try {
     const resp = await fetch('/settings/rule-filter/add', {
       method:  'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': _csrfToken},
       body:    JSON.stringify({rule_id: ruleId, title: title, source: source}),
     });
     const data = await resp.json();
@@ -443,7 +448,7 @@ async function addSelectedToFilter() {
   try {
     const resp = await fetch('/settings/rule-filter/add-bulk', {
       method:  'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': _csrfToken},
       body:    JSON.stringify({rules}),
     });
     const data = await resp.json();

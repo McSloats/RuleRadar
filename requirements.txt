@@ -6,6 +6,7 @@ tomli>=2.0,<3.0; python_version < "3.11"  # TOML parsing for Elastic rules (stdl
 # Web interface + auth
 flask>=3.0,<4.0
 flask-login>=0.6,<1.0
+flask-wtf>=1.2,<2.0
 bcrypt>=4.0,<5.0
 
 # Scheduler (replaces OS cron inside Docker / locally)

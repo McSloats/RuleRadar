@@ -39,6 +39,7 @@
 
     {# ── Repo selection ────────────────────────────────────────────────────── #}
     <form id="setup-form" method="post" action="{{ url_for('setup_repos_submit') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
       <p class="section-label">Choose repositories to monitor:</p>
 

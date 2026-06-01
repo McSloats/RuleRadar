@@ -75,6 +75,7 @@
 <div class="card">
   <div class="card-title">🔒 Change Password</div>
   <form method="post" action="{{ url_for('settings_password') }}" style="max-width:400px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="form-group">
       <label>Current Password</label>
       <input type="password" name="current_password" class="wide" autocomplete="current-password" required>
@@ -99,6 +100,7 @@
     Each user can have their own channel.
   </p>
   <form method="post" action="{{ url_for('settings_discord') }}" style="max-width:560px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="form-group">
       <label>Webhook URL</label>
       <input type="text" name="discord_webhook" class="wide"
@@ -114,6 +116,7 @@
 
       {% if user_settings.discord_webhook %}
       <form method="post" action="{{ url_for('settings_discord_test') }}" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-secondary">Send Test</button>
       </form>
       {% endif %}
@@ -176,6 +179,7 @@
         <td>
           <form method="post" action="{{ url_for('settings_filters_delete') }}"
                 style="display:inline;" onsubmit="return confirm('Remove this filter?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="filter_id" value="{{ f.id }}">
             <button type="submit" class="btn btn-danger btn-sm">Remove</button>
           </form>
@@ -192,6 +196,7 @@
   <hr class="divider">
   <p style="font-size:0.85rem; font-weight:600; margin-bottom:0.75rem;">Add a New Filter</p>
   <form method="post" action="{{ url_for('settings_filters_add') }}" style="max-width:620px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="form-group">
       <label>Filter Name <span class="text-muted">(required, must be unique)</span></label>
       <input type="text" name="name" class="wide" placeholder="e.g. New Sigma Rules" required>
@@ -263,6 +268,7 @@
     <a href="{{ url_for('rule_filter_page') }}" class="btn btn-secondary btn-sm">Manage entries →</a>
     <form method="post" action="{{ url_for('rule_filter_clear') }}" style="display:inline;"
           onsubmit="return confirm('Clear all {{ rule_filter_count }} filter entries?');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-danger btn-sm">Clear Filter</button>
     </form>
   </div>
@@ -275,6 +281,7 @@
   {# CSV upload #}
   <form method="post" action="{{ url_for('rule_filter_upload') }}"
         enctype="multipart/form-data" style="max-width:520px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="form-group">
       <label>Upload CSV <span class="text-muted">(adds to any existing entries)</span></label>
       <input type="file" name="csv_file" accept=".csv" class="wide" required>

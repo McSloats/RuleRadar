@@ -21,6 +21,7 @@
     </span>
     <form method="post" action="{{ url_for('rule_filter_clear') }}"
           onsubmit="return confirm('Clear all {{ filter_count }} entries?');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-danger btn-sm">Clear All</button>
     </form>
   {% else %}
@@ -67,6 +68,7 @@
           <form method="post"
                 action="{{ url_for('rule_filter_delete', filter_id=f.id) }}"
                 style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-danger btn-sm"
                     onclick="return confirm('Remove this entry?');">Remove</button>
           </form>

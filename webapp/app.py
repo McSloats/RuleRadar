@@ -39,11 +39,15 @@ import csv
 import io
 import json
 import secrets
+import shutil
 import sys
 import threading
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
+from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from functools import wraps
 from pathlib import Path
@@ -63,6 +67,7 @@ from flask_login import (
     LoginManager, UserMixin, current_user,
     login_required, login_user, logout_user,
 )
+from flask_wtf.csrf import CSRFProtect, CSRFError
 
 # ── App setup ──────────────────────────────────────────────────────────────────
 
@@ -86,12 +91,58 @@ def _load_secret_key() -> str:
 
 app.secret_key = _load_secret_key()
 
+csrf = CSRFProtect(app)
+
 login_manager = LoginManager(app)
 login_manager.login_view = "login"          # type: ignore[assignment]
 login_manager.login_message = "Please log in to access RuleRadar."
 login_manager.login_message_category = "error"
 
 db.init_db()
+
+
+# ── Login rate limiter (in-memory, per IP) ─────────────────────────────────────
+
+_login_attempts: dict[str, list[float]] = defaultdict(list)
+_login_lock = threading.Lock()
+_RATE_LIMIT_WINDOW = 60   # seconds
+_RATE_LIMIT_MAX    = 10   # max POST attempts per window per IP
+
+
+def _is_rate_limited(ip: str) -> bool:
+    now = time.time()
+    with _login_lock:
+        bucket = _login_attempts[ip]
+        bucket[:] = [t for t in bucket if now - t < _RATE_LIMIT_WINDOW]
+        if len(bucket) >= _RATE_LIMIT_MAX:
+            return True
+        bucket.append(now)
+        return False
+
+
+# ── Discord webhook validator ──────────────────────────────────────────────────
+
+def _is_valid_discord_webhook(url: str) -> bool:
+    """Return True if url is empty (disabled) or a valid Discord webhook URL."""
+    if not url:
+        return True
+    try:
+        p = urllib.parse.urlparse(url)
+        return (
+            p.scheme == "https"
+            and p.netloc in ("discord.com", "discordapp.com")
+            and p.path.startswith("/api/webhooks/")
+        )
+    except Exception:
+        return False
+
+
+# ── CSRF error handler ─────────────────────────────────────────────────────────
+
+@app.errorhandler(CSRFError)
+def csrf_error(_e: CSRFError):
+    flash("Your session expired or the request was invalid. Please try again.", "error")
+    return redirect(request.referrer or url_for("index"))
 
 
 # ── User model ─────────────────────────────────────────────────────────────────
@@ -241,15 +292,21 @@ def login():
         return redirect(url_for("dashboard"))
 
     if request.method == "POST":
+        if _is_rate_limited(request.remote_addr):
+            flash("Too many login attempts. Please wait a minute and try again.", "error")
+            return render_template("login.html")
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         row      = db.get_user_by_username(username)
         if row and bcrypt.checkpw(password.encode(), row["password_hash"].encode()):
-            login_user(User(row), remember=True)
+            login_user(User(row), remember=True, duration=timedelta(days=30))
             db.log_activity("auth", f"User '{username}' logged in",
                             actor=username,
                             detail=f"ip={request.remote_addr}")
-            next_page = request.args.get("next")
+            next_page = request.args.get("next", "")
+            parsed    = urllib.parse.urlparse(next_page)
+            if parsed.scheme or parsed.netloc:
+                next_page = ""
             return redirect(next_page or url_for("dashboard"))
         db.log_activity("auth", f"Failed login attempt for '{username}'",
                         actor=username or "unknown",
@@ -681,6 +738,13 @@ def settings_password():
 @login_required
 def settings_discord():
     webhook = request.form.get("discord_webhook", "").strip()
+    if not _is_valid_discord_webhook(webhook):
+        flash(
+            "Invalid Discord webhook URL. It must start with "
+            "https://discord.com/api/webhooks/",
+            "error",
+        )
+        return redirect(url_for("settings"))
     db.update_user_discord(current_user.id, webhook)
     db.log_activity("user",
                     "Discord webhook updated" if webhook else "Discord webhook cleared",
@@ -912,7 +976,6 @@ def admin_repos_remove(name: str):
         # Remove the local git clone
         local = Path(repo["local_path"])
         if local.exists():
-            import shutil
             try:
                 shutil.rmtree(str(local))
             except Exception as e:

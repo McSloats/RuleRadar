@@ -14,6 +14,7 @@
   <div class="auth-card">
     <p class="subtitle">Sign in to continue</p>
     <form method="post" autocomplete="on">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="form-group">
         <label for="username">Username</label>
         <input type="text" id="username" name="username"

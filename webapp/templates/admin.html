@@ -66,6 +66,7 @@
               <form method="post"
                     action="{{ url_for('admin_repos_toggle', name=repo.name) }}"
                     style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn btn-secondary btn-sm">
                   {{ 'Enable' if not repo.enabled else 'Disable' }}
                 </button>
@@ -80,6 +81,7 @@
                   </p>
                   <form method="post"
                         action="{{ url_for('admin_repos_remove', name=repo.name) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div style="margin-bottom:0.5rem; display:flex; align-items:center; gap:0.5rem;">
                       <input type="checkbox" name="delete_data" value="1"
                              id="del-data-{{ repo.name }}" style="width:auto; cursor:pointer;">
@@ -117,6 +119,7 @@
   <div style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-bottom:1.25rem;">
     {% for cfg in unconfigured %}
     <form method="post" action="{{ url_for('admin_repos_add') }}" style="display:inline;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="name" value="{{ cfg.name }}">
       <button type="submit" class="btn btn-secondary btn-sm">
         + {{ cfg.display_name }}
@@ -132,6 +135,7 @@
     </summary>
     <div class="detail-body" style="max-width:580px;">
       <form method="post" action="{{ url_for('admin_repos_add') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="form-group">
           <label>Identifier <span class="text-muted">(unique short name, e.g. my_rules)</span></label>
           <input type="text" name="name" class="wide" required placeholder="my_rules">
@@ -223,6 +227,7 @@
                     action="{{ url_for('admin_toggle_admin', user_id=user.id) }}"
                     style="display:inline;"
                     onsubmit="return confirm('Change admin status for {{ user.username }}?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn btn-secondary btn-sm">
                   {{ 'Revoke admin' if user.is_admin else 'Make admin' }}
                 </button>
@@ -234,6 +239,7 @@
                 <div class="detail-body">
                   <form method="post"
                         action="{{ url_for('admin_reset_password', user_id=user.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="form-group" style="margin-bottom:0.5rem;">
                       <label>New password</label>
                       <input type="password" name="new_password"
@@ -256,6 +262,7 @@
                     action="{{ url_for('admin_delete_user', user_id=user.id) }}"
                     style="display:inline;"
                     onsubmit="return confirm('Permanently delete user {{ user.username }}? This cannot be undone.');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn btn-danger btn-sm">Delete</button>
               </form>
               {% endif %}
@@ -271,6 +278,7 @@
   <hr class="divider">
   <p style="font-size:0.85rem; font-weight:600; margin-bottom:0.75rem;">Add New User</p>
   <form method="post" action="{{ url_for('admin_add_user') }}" style="max-width:460px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="form-group">
       <label>Username</label>
       <input type="text" name="username" class="wide" required autocomplete="off">
@@ -313,6 +321,7 @@
         Detections page. Runs in the request — may take a few seconds.
       </p>
       <form method="post" action="{{ url_for('admin_backfill_ttps') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-secondary">
           Run Splunk TTP Backfill
         </button>

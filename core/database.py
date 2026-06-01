@@ -170,6 +170,8 @@ def init_db():
     with get_conn() as conn:
         conn.executescript(SCHEMA)
         _migrate_schema(conn)
+        # Clear any stale scanning flag left over from a previous crash
+        conn.execute("UPDATE scan_status SET is_scanning = 0 WHERE id = 1")
 
 
 def _migrate_schema(conn: sqlite3.Connection):
@@ -978,6 +980,17 @@ def log_activity(
             "VALUES (?, ?, ?, ?, ?, ?)",
             (now_iso(), category, level, actor, action, detail),
         )
+
+
+def splunk_repos_have_missing_ttps() -> bool:
+    """Return True if any Splunk detection has an empty mitre_techniques field."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM detections d"
+            " JOIN repos r ON r.name = d.source"
+            " WHERE r.parser = 'splunk' AND d.mitre_techniques = '' LIMIT 1"
+        ).fetchone()
+    return row is not None
 
 
 def get_activity_log(

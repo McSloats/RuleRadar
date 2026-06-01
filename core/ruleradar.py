@@ -1240,6 +1240,19 @@ def run_scan(triggered_by: str = "scheduler") -> dict:
             except Exception as e:
                 print(f"  [{repo_cfg['name']}] Releases fetch error: {e}", file=sys.stderr)
 
+        # ── Opportunistic TTP backfill ─────────────────────────────────────────
+        # Re-parse Splunk rules with empty TTPs. The guard skips this entirely
+        # once all rows are populated, keeping subsequent scans fast.
+        if db.splunk_repos_have_missing_ttps():
+            bf = backfill_splunk_ttps()
+            if bf["updated"] > 0:
+                print(f"  TTP backfill: {bf['updated']} Splunk rules updated", flush=True)
+                db.log_activity(
+                    "scan", f"TTP backfill: {bf['updated']} Splunk rules updated",
+                    actor=triggered_by,
+                    detail=f"examined={bf['examined']}, errors={bf['errors']}",
+                )
+
         db.finish_scan(total_new, total_mod)
 
         summary_str = " | ".join(repo_summary)
