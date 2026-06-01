@@ -74,12 +74,14 @@ CREATE TABLE IF NOT EXISTS detections (
     rule_status      TEXT    NOT NULL DEFAULT '',
     rule_date        TEXT    NOT NULL DEFAULT '',
     refs             TEXT    NOT NULL DEFAULT '',
+    rule_id          TEXT    NOT NULL DEFAULT '',
     UNIQUE(source, file_path)
 );
 
 CREATE INDEX IF NOT EXISTS idx_det_source       ON detections(source);
 CREATE INDEX IF NOT EXISTS idx_det_last_updated ON detections(last_updated DESC);
 CREATE INDEX IF NOT EXISTS idx_det_mitre        ON detections(mitre_techniques);
+CREATE INDEX IF NOT EXISTS idx_det_rule_id      ON detections(rule_id);
 
 -- ── Change log (every new/modified/deleted event is appended here) ────────────
 CREATE TABLE IF NOT EXISTS updates (
@@ -134,6 +136,21 @@ CREATE TABLE IF NOT EXISTS scan_status (
 );
 
 INSERT OR IGNORE INTO scan_status (id) VALUES (1);
+
+-- ── Per-user persistent rule filter ──────────────────────────────────────────
+-- Each row is one filter criterion. A detection/update passes if it matches
+-- ANY row for the user (rows are ORed). Within a row, all non-empty columns
+-- are ANDed.  Duplicate rows are silently ignored via the UNIQUE constraint.
+CREATE TABLE IF NOT EXISTS user_rule_filters (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    rule_id       TEXT    NOT NULL DEFAULT '',
+    title_pattern TEXT    NOT NULL DEFAULT '',
+    source        TEXT    NOT NULL DEFAULT '',
+    created_at    TEXT    NOT NULL,
+    UNIQUE(user_id, rule_id, title_pattern, source)
+);
+CREATE INDEX IF NOT EXISTS idx_urf_user_id ON user_rule_filters(user_id);
 """
 
 
@@ -170,6 +187,8 @@ def _migrate_schema(conn: sqlite3.Connection):
         "ALTER TABLE detections ADD COLUMN rule_status      TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE detections ADD COLUMN rule_date        TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE detections ADD COLUMN refs             TEXT NOT NULL DEFAULT ''",
+        # v4: source rule UUID for precise filter matching
+        "ALTER TABLE detections ADD COLUMN rule_id          TEXT NOT NULL DEFAULT ''",
     ]
     for sql in migrations:
         try:
@@ -385,6 +404,93 @@ def get_dashboard_totals(cutoff_7d: str) -> dict:
     return {"total_rules": total_rules, "events_7d": events_7d}
 
 
+# ── Per-user rule filter helpers ───────────────────────────────────────────────
+
+def get_user_rule_filters(user_id: int) -> list[dict]:
+    """Return all filter rows for a user, newest first."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM user_rule_filters WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_user_rule_filter_count(user_id: int) -> int:
+    """Return the number of active filter entries for a user."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM user_rule_filters WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()[0]
+
+
+def add_user_rule_filter(
+    user_id: int,
+    rule_id: str = "",
+    title_pattern: str = "",
+    source: str = "",
+) -> bool:
+    """
+    Add one filter row.  Returns True if a new row was inserted, False if
+    the row already existed (duplicate silently ignored).
+    At least one of rule_id, title_pattern, or source must be non-empty.
+    """
+    if not (rule_id or title_pattern or source):
+        return False
+    with get_conn() as conn:
+        cur = conn.execute(
+            """INSERT OR IGNORE INTO user_rule_filters
+               (user_id, rule_id, title_pattern, source, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (user_id, rule_id, title_pattern, source, now_iso()),
+        )
+    return cur.rowcount > 0
+
+
+def add_user_rule_filters_bulk(user_id: int, rows: list[dict]) -> int:
+    """
+    Insert multiple filter rows (each a dict with rule_id/title_pattern/source).
+    Duplicates are silently ignored.  Returns the number of new rows inserted.
+    """
+    inserted = 0
+    with get_conn() as conn:
+        for row in rows:
+            rid = (row.get("rule_id") or "").strip()
+            pat = (row.get("title_pattern") or row.get("title") or "").strip()
+            src = (row.get("source") or "").strip().lower()
+            if not (rid or pat or src):
+                continue
+            cur = conn.execute(
+                """INSERT OR IGNORE INTO user_rule_filters
+                   (user_id, rule_id, title_pattern, source, created_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (user_id, rid, pat, src, now_iso()),
+            )
+            inserted += cur.rowcount
+    return inserted
+
+
+def delete_user_rule_filter(user_id: int, filter_id: int) -> bool:
+    """Delete one filter row, ensuring it belongs to the given user."""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "DELETE FROM user_rule_filters WHERE id = ? AND user_id = ?",
+            (filter_id, user_id),
+        )
+    return cur.rowcount > 0
+
+
+def clear_user_rule_filters(user_id: int) -> int:
+    """Delete all filter rows for a user.  Returns the count deleted."""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "DELETE FROM user_rule_filters WHERE user_id = ?",
+            (user_id,),
+        )
+    return cur.rowcount
+
+
 def any_repos_configured() -> bool:
     """
     Return True if at least one repo has been enabled by an admin.
@@ -493,6 +599,7 @@ def upsert_detection(
     rule_status: str = "",
     rule_date: str = "",
     refs: str = "",
+    rule_id: str = "",
 ) -> bool:
     """
     Insert or update a detection row.
@@ -513,12 +620,12 @@ def upsert_detection(
                    SET title=?, description=?, detection_logic=?, spl=?,
                        rule_url=?, last_updated=?,
                        mitre_techniques=?, mitre_tactics=?,
-                       author=?, rule_status=?, rule_date=?, refs=?
+                       author=?, rule_status=?, rule_date=?, refs=?, rule_id=?
                    WHERE source=? AND file_path=?""",
                 (
                     title, description, detection_logic, spl, rule_url, ts,
                     mitre_techniques, mitre_tactics,
-                    author, rule_status, rule_date, refs,
+                    author, rule_status, rule_date, refs, rule_id,
                     source, file_path,
                 ),
             )
@@ -528,13 +635,13 @@ def upsert_detection(
                (source, file_path, title, description, detection_logic, spl,
                 rule_url, first_seen, last_updated,
                 mitre_techniques, mitre_tactics,
-                author, rule_status, rule_date, refs)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,  ?, ?,  ?, ?, ?, ?)""",
+                author, rule_status, rule_date, refs, rule_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,  ?, ?,  ?, ?, ?, ?, ?)""",
             (
                 source, file_path, title, description, detection_logic, spl,
                 rule_url, ts, ts,
                 mitre_techniques, mitre_tactics,
-                author, rule_status, rule_date, refs,
+                author, rule_status, rule_date, refs, rule_id,
             ),
         )
         return True
@@ -549,6 +656,43 @@ def delete_detection(source: str, file_path: str):
         )
 
 
+def _build_rule_filter_clause(
+    user_filter_rows: list,
+    source_prefix: str = "",
+) -> tuple[str, list]:
+    """
+    Build a SQL OR clause from a user's rule-filter rows.
+
+    source_prefix: table alias prefix for column names (e.g. "u." for updates,
+                   "" for detections queried without an alias).
+    Returns (sql_fragment, params).  Returns ("", []) when rows is empty.
+    Each row is ANDed internally; rows are ORed together.
+    """
+    if not user_filter_rows:
+        return "", []
+
+    sp        = source_prefix           # "" or "u." / "d."
+    row_clauses, row_params = [], []
+    for frow in user_filter_rows:
+        conds, params_local = [], []
+        if frow.get("rule_id"):
+            conds.append(f"({sp}rule_id = ?)")
+            params_local.append(frow["rule_id"])
+        if frow.get("title_pattern"):
+            conds.append(f"LOWER({sp}title) LIKE ?")
+            params_local.append(f"%{frow['title_pattern'].lower()}%")
+        if frow.get("source"):
+            conds.append(f"{sp}source = ?")
+            params_local.append(frow["source"])
+        if conds:
+            row_clauses.append("(" + " AND ".join(conds) + ")")
+            row_params.extend(params_local)
+
+    if not row_clauses:
+        return "", []
+    return "(" + " OR ".join(row_clauses) + ")", row_params
+
+
 def search_detections(
     title: str = "",
     description: str = "",
@@ -558,15 +702,17 @@ def search_detections(
     details_q: str = "",
     page: int = 1,
     per_page: int = 50,
+    user_filter_rows: list | None = None,
 ) -> tuple[list[dict], int]:
     """
     Search detections with per-field filters and a detail-panel keyword search.
-    - title       : searches title only
-    - description : searches description only
-    - source      : 'sigma' | 'splunk' | 'elastic' | '' (all)
-    - mitre       : searches mitre_techniques and mitre_tactics (e.g. 'T1059' or 'Execution')
-    - days        : '7'|'30'|'90'|'' — limit to rules updated in the last N days
-    - details_q   : keyword across detection_logic, spl, author, rule_status, rule_date, refs
+    - title            : searches title only
+    - description      : searches description only
+    - source           : 'sigma' | 'splunk' | 'elastic' | '' (all)
+    - mitre            : searches mitre_techniques and mitre_tactics
+    - days             : '7'|'30'|'90'|'' — limit to rules updated in the last N days
+    - details_q        : keyword across detection_logic, spl, author, rule_status, rule_date, refs
+    - user_filter_rows : if set, only return rules matching at least one filter row
     Returns (rows, total_count).
     """
     conditions, params = [], []
@@ -599,6 +745,13 @@ def search_detections(
         )
         like = f"%{details_q}%"
         params += [like, like, like, like, like, like]
+
+    # Per-user persistent rule filter (OR across rows, AND within each row)
+    if user_filter_rows:
+        fclause, fparams = _build_rule_filter_clause(user_filter_rows, source_prefix="")
+        if fclause:
+            conditions.append(fclause)
+            params.extend(fparams)
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
@@ -639,6 +792,7 @@ def get_updates(
     details_q: str = "",
     limit: int = 100,
     offset: int = 0,
+    user_filter_rows: list | None = None,
 ) -> tuple[list[dict], int]:
     """
     Return paginated update events, newest first.
@@ -685,6 +839,28 @@ def get_updates(
             " OR COALESCE(d.refs,        '') LIKE ?)"
         )
         params += [like, like, like, like, like, like, like]
+
+    # Per-user persistent rule filter.  For updates we match against u.title /
+    # u.source; rule_id is matched against the joined detections.rule_id.
+    if user_filter_rows:
+        row_clauses, row_params = [], []
+        for frow in user_filter_rows:
+            fconds, fp = [], []
+            if frow.get("rule_id"):
+                fconds.append("COALESCE(d.rule_id, '') = ?")
+                fp.append(frow["rule_id"])
+            if frow.get("title_pattern"):
+                fconds.append("LOWER(u.title) LIKE ?")
+                fp.append(f"%{frow['title_pattern'].lower()}%")
+            if frow.get("source"):
+                fconds.append("u.source = ?")
+                fp.append(frow["source"])
+            if fconds:
+                row_clauses.append("(" + " AND ".join(fconds) + ")")
+                row_params.extend(fp)
+        if row_clauses:
+            conds.append("(" + " OR ".join(row_clauses) + ")")
+            params.extend(row_params)
 
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
     join  = "LEFT JOIN detections d ON d.source = u.source AND d.file_path = u.file_path"

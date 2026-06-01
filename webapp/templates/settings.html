@@ -244,4 +244,50 @@
   </form>
 </div>
 
+{# ═══ Persistent Rule Filter ═══════════════════════════════════════════════════ #}
+<div class="card">
+  <div class="card-title">🎯 Persistent Rule Filter</div>
+  <p class="text-muted text-small" style="margin-bottom:1rem;">
+    Upload a CSV to restrict the Detections and Updates pages to only rules relevant to
+    your environment. Each user has their own independent filter. If no filter is set,
+    all rules are shown.
+  </p>
+
+  {# Status #}
+  {% if rule_filter_count > 0 %}
+  <div style="display:flex; align-items:center; gap:1rem; margin-bottom:1rem; flex-wrap:wrap;">
+    <span class="text-success text-small">
+      ✓ Filter active — <strong>{{ rule_filter_count }}</strong>
+      entr{{ 'ies' if rule_filter_count != 1 else 'y' }}
+    </span>
+    <a href="{{ url_for('rule_filter_page') }}" class="btn btn-secondary btn-sm">Manage entries →</a>
+    <form method="post" action="{{ url_for('rule_filter_clear') }}" style="display:inline;"
+          onsubmit="return confirm('Clear all {{ rule_filter_count }} filter entries?');">
+      <button type="submit" class="btn btn-danger btn-sm">Clear Filter</button>
+    </form>
+  </div>
+  {% else %}
+  <p class="text-muted text-small" style="margin-bottom:1rem;">
+    No filter active — all rules are shown.
+  </p>
+  {% endif %}
+
+  {# CSV upload #}
+  <form method="post" action="{{ url_for('rule_filter_upload') }}"
+        enctype="multipart/form-data" style="max-width:520px;">
+    <div class="form-group">
+      <label>Upload CSV <span class="text-muted">(adds to any existing entries)</span></label>
+      <input type="file" name="csv_file" accept=".csv" class="wide" required>
+      <p class="hint" style="margin-top:0.4rem;">
+        Columns: <code>rule_id</code>, <code>title</code>, <code>source</code> — at least
+        one must be filled per row. Case-insensitive title matching (LIKE).
+        <a href="{{ url_for('rule_filter_sample_csv') }}" style="color:#d4a017;">
+          Download sample CSV ↓
+        </a>
+      </p>
+    </div>
+    <button type="submit" class="btn btn-primary">Upload Filter</button>
+  </form>
+</div>
+
 {% endblock %}

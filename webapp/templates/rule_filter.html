@@ -1,0 +1,88 @@
+{% extends "layout.html" %}
+{% block title %}Rule Filter — RuleRadar{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <a href="{{ url_for('settings') }}" class="btn btn-secondary btn-sm">← Settings</a>
+  <h2>Rule Filter</h2>
+</div>
+
+<p class="text-muted text-small" style="margin-bottom:1rem;">
+  Only rules matching at least one entry below will appear on the Detections and Updates pages.
+  Within each row, all filled columns are ANDed; rows are ORed.
+  <a href="{{ url_for('rule_filter_sample_csv') }}" style="color:#d4a017;">Download sample CSV ↓</a>
+</p>
+
+{# Summary + bulk actions #}
+<div style="display:flex; gap:0.75rem; align-items:center; margin-bottom:1rem; flex-wrap:wrap;">
+  {% if filter_count > 0 %}
+    <span class="text-success text-small">
+      ✓ <strong>{{ filter_count }}</strong> entr{{ 'ies' if filter_count != 1 else 'y' }} active
+    </span>
+    <form method="post" action="{{ url_for('rule_filter_clear') }}"
+          onsubmit="return confirm('Clear all {{ filter_count }} entries?');">
+      <button type="submit" class="btn btn-danger btn-sm">Clear All</button>
+    </form>
+  {% else %}
+    <span class="text-muted text-small">No filter entries yet.</span>
+  {% endif %}
+  <a href="{{ url_for('rule_filter_upload') }}" style="display:none"></a>
+  <a href="{{ url_for('settings') }}#rule-filter" class="btn btn-secondary btn-sm">Upload CSV</a>
+</div>
+
+{% if filters %}
+<div class="table-wrap">
+  <table class="static-table">
+    <thead>
+      <tr>
+        <th style="width:220px;">Rule ID</th>
+        <th>Title Pattern</th>
+        <th style="width:90px;">Source</th>
+        <th style="width:150px;">Added</th>
+        <th style="width:80px;"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in filters %}
+      <tr>
+        <td class="text-small">
+          {% if f.rule_id %}
+            <code style="font-size:0.75rem; color:#c4b5fd;">{{ f.rule_id }}</code>
+          {% else %}
+            <span class="text-muted">—</span>
+          {% endif %}
+        </td>
+        <td class="text-small">{{ f.title_pattern or '—' }}</td>
+        <td>
+          {% if f.source %}
+            <span class="badge badge-{{ f.source }}">{{ f.source }}</span>
+          {% else %}
+            <span class="text-muted text-small">any</span>
+          {% endif %}
+        </td>
+        <td class="text-muted text-small nowrap">
+          {{ f.created_at[:16].replace('T', ' ') if f.created_at else '—' }}
+        </td>
+        <td>
+          <form method="post"
+                action="{{ url_for('rule_filter_delete', filter_id=f.id) }}"
+                style="display:inline;">
+            <button type="submit" class="btn btn-danger btn-sm"
+                    onclick="return confirm('Remove this entry?');">Remove</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state">
+  <p>No filter entries yet.<br>
+    Upload a CSV from the <a href="{{ url_for('settings') }}">Settings page</a> or use
+    the "Add to Filter" buttons on the Detections page.
+  </p>
+</div>
+{% endif %}
+
+{% endblock %}

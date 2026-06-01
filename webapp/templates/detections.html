@@ -99,26 +99,56 @@ function toggleFilterPanel() {
   {% if details_q %} details matching <strong>{{ details_q }}</strong>{% endif %}
 </p>
 
+{# ── Rule-filter indicator ────────────────────────────────────────────────── #}
+{% if rule_filter_count > 0 %}
+<div class="rule-filter-bar">
+  ⚡ Rule filter active — {{ rule_filter_count }} entr{{ 'ies' if rule_filter_count != 1 else 'y' }},
+  showing only matching results.
+  <a href="{{ url_for('rule_filter_page') }}" class="rule-filter-bar-link">Manage →</a>
+</div>
+{% endif %}
+
 {# ── Results table ────────────────────────────────────────────────────────── #}
 {% if rows %}
+
+{# Bulk action bar (hidden until a checkbox is ticked) #}
+<div class="bulk-action-bar" id="bulk-bar" style="display:none;">
+  <span id="bulk-count">0</span> selected
+  <button class="btn btn-primary btn-sm" onclick="addSelectedToFilter()">
+    ⊕ Add Selected to Filter
+  </button>
+  <button class="btn btn-secondary btn-sm" onclick="clearSelection()">Clear</button>
+</div>
+
 <div class="table-wrap">
-  <table>
+  <table id="detections-table">
     <thead>
       <tr>
+        <th style="width:30px;" onclick="event.stopPropagation()">
+          <input type="checkbox" id="select-all" title="Select all">
+        </th>
         <th style="width:22px;"></th>
         <th>Title</th>
         <th style="width:175px;">MITRE TTPs</th>
         <th style="width:75px;">Source</th>
         <th>Description</th>
         <th style="width:140px;">Last Updated</th>
-        <th style="width:70px;">Link</th>
+        <th style="width:100px;">Actions</th>
       </tr>
     </thead>
     <tbody>
       {% for row in rows %}
+      {% set is_filtered = row.rule_id and row.rule_id in filtered_rule_ids %}
 
       {# ── Data row ── #}
       <tr class="data-row" onclick="toggleDetail(this)">
+        <td onclick="event.stopPropagation()">
+          <input type="checkbox" class="row-select"
+                 data-rule-id="{{ row.rule_id }}"
+                 data-title="{{ row.title | replace('"', '&quot;') }}"
+                 data-source="{{ row.source }}"
+                 onchange="updateBulkBar()">
+        </td>
         <td><span class="expand-arrow">▶</span></td>
         <td><strong>{{ row.title }}</strong></td>
         <td onclick="event.stopPropagation()" class="mitre-cell">
@@ -137,17 +167,22 @@ function toggleFilterPanel() {
         <td class="nowrap text-muted text-small">
           {{ row.last_updated[:16].replace('T', ' ') if row.last_updated else '—' }}
         </td>
-        <td onclick="event.stopPropagation()">
+        <td onclick="event.stopPropagation()" style="white-space:nowrap;">
           {% if row.rule_url %}
             <a href="{{ row.rule_url }}" target="_blank" rel="noopener"
-               class="text-small">GitHub ↗</a>
+               class="text-small" style="margin-right:0.4rem;">GitHub ↗</a>
           {% endif %}
+          <button class="btn btn-sm filter-btn {% if is_filtered %}filter-btn-active{% endif %}"
+                  {% if is_filtered %}disabled{% endif %}
+                  onclick="addToFilter(this, '{{ row.rule_id }}', '{{ row.title | replace("'", "\\'") }}', '{{ row.source }}')">
+            {{ '✓' if is_filtered else '⊕' }}
+          </button>
         </td>
       </tr>
 
       {# ── Expandable detail row ── #}
       <tr class="detail-row">
-        <td colspan="7">
+        <td colspan="8">
 
           {# Meta row: author / status / date #}
           {% if row.author or row.rule_status or row.rule_date %}
@@ -266,14 +301,54 @@ function toggleFilterPanel() {
 {% else %}
 <div class="empty-state">
   <p>
-    {% if title or description or source or mitre or days or details_q %}
+    {% if title or description or source or mitre or days or details_q or rule_filter_count %}
       No detections found matching your filters.
+      {% if rule_filter_count %}<br>
+        <a href="{{ url_for('rule_filter_page') }}" style="color:#d4a017;">
+          Manage rule filter ({{ rule_filter_count }} active entries) →
+        </a>
+      {% endif %}
     {% else %}
       No detections in the database yet.<br>The initial scan is running in the background — check back shortly.
     {% endif %}
   </p>
 </div>
 {% endif %}
+
+<style>
+/* ── Bulk action bar ───────────────────────────────────────────────────── */
+.bulk-action-bar {
+  background: #160f2a;
+  border: 1px solid #2b1e4a;
+  border-radius: 6px;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.82rem;
+  color: #9080b8;
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+/* ── Add-to-filter button ──────────────────────────────────────────────── */
+.filter-btn {
+  background: #0a0716;
+  border: 1px solid #2b1e4a;
+  color: #9080b8;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.75rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.filter-btn:hover { background: #2b1e4a; color: #c4b5fd; }
+.filter-btn-active {
+  background: #14301f;
+  border-color: #1a5c38;
+  color: #6ee7b7;
+  cursor: default;
+}
+</style>
 
 <script>
 function toggleDetail(row) {
@@ -282,6 +357,88 @@ function toggleDetail(row) {
   const open   = detail.style.display !== 'table-row';
   detail.style.display = open ? 'table-row' : 'none';
   arrow.textContent = open ? '▼' : '▶';
+}
+
+/* ── Select-all ────────────────────────────────────────────────────────── */
+document.getElementById('select-all')?.addEventListener('change', function () {
+  document.querySelectorAll('.row-select').forEach(cb => cb.checked = this.checked);
+  updateBulkBar();
+});
+
+function updateBulkBar() {
+  const n   = document.querySelectorAll('.row-select:checked').length;
+  const bar = document.getElementById('bulk-bar');
+  document.getElementById('bulk-count').textContent = n;
+  bar.style.display = n > 0 ? 'flex' : 'none';
+}
+
+function clearSelection() {
+  document.querySelectorAll('.row-select').forEach(cb => cb.checked = false);
+  document.getElementById('select-all').checked = false;
+  updateBulkBar();
+}
+
+/* ── Per-row add-to-filter ─────────────────────────────────────────────── */
+async function addToFilter(btn, ruleId, title, source) {
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/settings/rule-filter/add', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({rule_id: ruleId, title: title, source: source}),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      btn.textContent = '✓';
+      btn.classList.add('filter-btn-active');
+      updateFilterCount(data.count);
+    } else {
+      btn.disabled = false;
+    }
+  } catch (_) {
+    btn.disabled = false;
+  }
+}
+
+/* ── Bulk add-to-filter ────────────────────────────────────────────────── */
+async function addSelectedToFilter() {
+  const checkboxes = document.querySelectorAll('.row-select:checked');
+  if (!checkboxes.length) return;
+  const rules = Array.from(checkboxes).map(cb => ({
+    rule_id: cb.dataset.ruleId,
+    title:   cb.dataset.title,
+    source:  cb.dataset.source,
+  }));
+  try {
+    const resp = await fetch('/settings/rule-filter/add-bulk', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({rules}),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      checkboxes.forEach(cb => {
+        const btn = cb.closest('tr')?.querySelector('.filter-btn');
+        if (btn) { btn.textContent = '✓'; btn.classList.add('filter-btn-active'); btn.disabled = true; }
+        cb.checked = false;
+      });
+      document.getElementById('select-all').checked = false;
+      updateBulkBar();
+      updateFilterCount(data.count);
+    }
+  } catch (_) {}
+}
+
+/* ── Update the filter-indicator count live ────────────────────────────── */
+function updateFilterCount(n) {
+  const bar = document.querySelector('.rule-filter-bar');
+  if (!bar) {
+    // bar wasn't rendered (filter was 0); reload so the bar appears
+    location.reload();
+    return;
+  }
+  // Replace the count in the bar text
+  bar.innerHTML = bar.innerHTML.replace(/\d+ entr/, n + ' entr');
 }
 </script>
 

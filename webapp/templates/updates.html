@@ -21,6 +21,15 @@
 </div>
 {% endif %}
 
+{# ── Rule-filter indicator ────────────────────────────────────────────────── #}
+{% if rule_filter_count > 0 %}
+<div class="rule-filter-bar">
+  ⚡ Rule filter active — {{ rule_filter_count }} entr{{ 'ies' if rule_filter_count != 1 else 'y' }},
+  showing only matching results.
+  <a href="{{ url_for('rule_filter_page') }}" class="rule-filter-bar-link">Manage →</a>
+</div>
+{% endif %}
+
 {# ── Filter bar ───────────────────────────────────────────────────────────── #}
 {% set _panel_active = source or change_type or days or details_q %}
 {% set _panel_count  = (1 if source else 0) + (1 if change_type else 0)

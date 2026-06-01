@@ -35,6 +35,8 @@ Auth: Flask-Login with bcrypt-hashed passwords.
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import secrets
 import sys
@@ -54,7 +56,7 @@ from core import database as db
 from core import ruleradar
 
 from flask import (
-    Flask, abort, flash, jsonify, redirect,
+    Flask, Response, abort, flash, jsonify, redirect,
     render_template, request, url_for,
 )
 from flask_login import (
@@ -192,6 +194,13 @@ def _get_saved_filters() -> list[dict]:
         return json.loads(settings.get("saved_filters", "[]"))
     except (json.JSONDecodeError, TypeError):
         return []
+
+
+def _get_user_rule_filters() -> list[dict]:
+    """Return the current user's persistent rule-filter rows."""
+    if not current_user.is_authenticated:
+        return []
+    return db.get_user_rule_filters(current_user.id)
 
 
 # ── Auth routes ────────────────────────────────────────────────────────────────
@@ -412,12 +421,17 @@ def detections():
     page        = max(1, int(request.args.get("page", 1) or 1))
     per_page    = 50
 
+    rule_filter_rows = _get_user_rule_filters()
     rows, total = db.search_detections(
         title=title, description=description,
         source=source, mitre=mitre, days=days, details_q=details_q,
         page=page, per_page=per_page,
+        user_filter_rows=rule_filter_rows or None,
     )
     total_pages = max(1, (total + per_page - 1) // per_page)
+
+    # Build set of rule_ids already in the filter for quick lookup in template
+    filtered_rule_ids = {f["rule_id"] for f in rule_filter_rows if f.get("rule_id")}
 
     return render_template(
         "detections.html",
@@ -426,6 +440,8 @@ def detections():
         title=title, description=description,
         source=source, mitre=mitre, days=days, details_q=details_q,
         saved_filters=_get_saved_filters(),
+        rule_filter_count=len(rule_filter_rows),
+        filtered_rule_ids=filtered_rule_ids,
     )
 
 
@@ -442,10 +458,12 @@ def updates():
     per_page    = 50
     offset      = (page - 1) * per_page
 
+    rule_filter_rows = _get_user_rule_filters()
     rows, total = db.get_updates(
         source=source, change_type=change_type,
         title=title, days=days, details_q=details_q,
         limit=per_page, offset=offset,
+        user_filter_rows=rule_filter_rows or None,
     )
     total_pages = max(1, (total + per_page - 1) // per_page)
 
@@ -456,7 +474,120 @@ def updates():
         source=source, change_type=change_type,
         title=title, days=days, details_q=details_q,
         saved_filters=_get_saved_filters(),
+        rule_filter_count=len(rule_filter_rows),
     )
+
+
+# ── Rule filter routes ─────────────────────────────────────────────────────────
+
+@app.route("/settings/rule-filter")
+@login_required
+def rule_filter_page():
+    """Management page: full table of the user's rule-filter entries."""
+    filters = db.get_user_rule_filters(current_user.id)
+    return render_template("rule_filter.html", filters=filters,
+                           filter_count=len(filters))
+
+
+@app.route("/settings/rule-filter/sample.csv")
+@login_required
+def rule_filter_sample_csv():
+    """Download a sample CSV showing the expected upload format."""
+    sample = (
+        "rule_id,title,source\n"
+        "7b15a4a0-1f0b-4d8e-9bf3-b8e8e5fb6a77,Mimikatz Use,sigma\n"
+        ",PowerShell Download Cradle,splunk\n"
+        "abc12345-0000-0000-0000-000000000001,,elastic\n"
+    )
+    return Response(
+        sample,
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=rule_filter_sample.csv"},
+    )
+
+
+@app.route("/settings/rule-filter/upload", methods=["POST"])
+@login_required
+def rule_filter_upload():
+    """Parse an uploaded CSV and bulk-insert rows into the user's filter."""
+    f = request.files.get("csv_file")
+    if not f or not f.filename:
+        flash("Please select a CSV file to upload.", "error")
+        return redirect(url_for("settings"))
+
+    try:
+        text    = f.read().decode("utf-8-sig", errors="replace")
+        reader  = csv.DictReader(io.StringIO(text))
+        rows    = []
+        for row in reader:
+            rid = (row.get("rule_id") or "").strip()
+            pat = (row.get("title")   or "").strip()
+            src = (row.get("source")  or "").strip().lower()
+            if rid or pat or src:
+                rows.append({"rule_id": rid, "title": pat, "source": src})
+    except Exception as e:
+        flash(f"Could not parse CSV: {e}", "error")
+        return redirect(url_for("settings"))
+
+    if not rows:
+        flash("The CSV contained no valid rows.", "error")
+        return redirect(url_for("settings"))
+
+    added = db.add_user_rule_filters_bulk(current_user.id, rows)
+    total = db.get_user_rule_filter_count(current_user.id)
+    db.log_activity("user", f"Rule filter CSV uploaded ({added} added)",
+                    actor=current_user.username,
+                    detail=f"rows_in_file={len(rows)}, new={added}, total={total}")
+    flash(f"Filter updated: {added} new entr{'ies' if added != 1 else 'y'} added "
+          f"({total} total active).", "success")
+    return redirect(url_for("settings"))
+
+
+@app.route("/settings/rule-filter/clear", methods=["POST"])
+@login_required
+def rule_filter_clear():
+    """Remove all of the current user's rule-filter entries."""
+    deleted = db.clear_user_rule_filters(current_user.id)
+    db.log_activity("user", f"Rule filter cleared ({deleted} entries removed)",
+                    actor=current_user.username)
+    flash(f"Filter cleared — {deleted} entr{'ies' if deleted != 1 else 'y'} removed.",
+          "success")
+    return redirect(url_for("settings"))
+
+
+@app.route("/settings/rule-filter/add", methods=["POST"])
+@login_required
+def rule_filter_add():
+    """AJAX endpoint: add one rule to the filter. Returns JSON."""
+    data        = request.get_json(silent=True) or {}
+    rule_id     = (data.get("rule_id")  or "").strip()
+    title       = (data.get("title")    or "").strip()
+    source      = (data.get("source")   or "").strip().lower()
+    inserted    = db.add_user_rule_filter(current_user.id,
+                                         rule_id=rule_id,
+                                         title_pattern=title,
+                                         source=source)
+    total = db.get_user_rule_filter_count(current_user.id)
+    return jsonify({"ok": True, "inserted": inserted, "count": total})
+
+
+@app.route("/settings/rule-filter/add-bulk", methods=["POST"])
+@login_required
+def rule_filter_add_bulk():
+    """AJAX endpoint: add multiple rules to the filter. Returns JSON."""
+    data  = request.get_json(silent=True) or {}
+    rules = data.get("rules") or []
+    added = db.add_user_rule_filters_bulk(current_user.id, rules)
+    total = db.get_user_rule_filter_count(current_user.id)
+    return jsonify({"ok": True, "added": added, "count": total})
+
+
+@app.route("/settings/rule-filter/delete/<int:filter_id>", methods=["POST"])
+@login_required
+def rule_filter_delete(filter_id: int):
+    """Delete one rule-filter entry by id (must belong to the current user)."""
+    db.delete_user_rule_filter(current_user.id, filter_id)
+    return redirect(url_for("rule_filter_page"))
 
 
 # ── Settings ───────────────────────────────────────────────────────────────────
@@ -490,6 +621,7 @@ def settings():
         last_scan_display=last_scan_display,
         next_scan_display=next_scan_display,
         repos=repos,
+        rule_filter_count=db.get_user_rule_filter_count(current_user.id),
     )
 
 

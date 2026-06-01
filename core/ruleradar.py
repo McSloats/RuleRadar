@@ -629,6 +629,7 @@ def _process_sigma(source: str, rel_path: str, text: str, rule_url: str) -> tupl
     author      = str(meta.get("author",      ""))[:200]
     rule_status = str(meta.get("status",      ""))[:50]
     rule_date   = str(meta.get("date",        ""))[:20]
+    rule_id     = str(meta.get("id",          ""))[:64]
     refs_raw    = meta.get("references") or []
     refs        = (
         "\n".join(str(r) for r in refs_raw)
@@ -640,7 +641,7 @@ def _process_sigma(source: str, rel_path: str, text: str, rule_url: str) -> tupl
         source, rel_path, title, description, logic, spl or "", rule_url,
         mitre_techniques=techniques, mitre_tactics=tactics,
         author=author, rule_status=rule_status,
-        rule_date=rule_date, refs=refs,
+        rule_date=rule_date, refs=refs, rule_id=rule_id,
     )
     return is_new, title
 
@@ -664,6 +665,7 @@ def _process_splunk(source: str, rel_path: str, text: str, rule_url: str) -> tup
     author      = str(meta.get("author",      ""))[:200]
     rule_status = str(meta.get("status",      ""))[:50]
     rule_date   = str(meta.get("date",        ""))[:20]
+    rule_id     = str(meta.get("id",          ""))[:64]
     refs_raw    = meta.get("references") or []
     refs        = (
         "\n".join(str(r) for r in refs_raw)
@@ -675,7 +677,7 @@ def _process_splunk(source: str, rel_path: str, text: str, rule_url: str) -> tup
         source, rel_path, title, description, "", search[:500], rule_url,
         mitre_techniques=techniques, mitre_tactics=tactics,
         author=author, rule_status=rule_status,
-        rule_date=rule_date, refs=refs,
+        rule_date=rule_date, refs=refs, rule_id=rule_id,
     )
     return is_new, title
 
@@ -715,6 +717,8 @@ def _process_elastic(source: str, rel_path: str, text: str, rule_url: str) -> tu
 
     # Maturity ("stable" / "production") doubles as rule status in Elastic rules
     rule_status = str(rule.get("maturity", "") or rule.get("status", ""))[:50]
+    # Elastic stores the UUID as rule.rule_id
+    rule_id     = str(rule.get("rule_id", ""))[:64]
 
     # Creation date — lives in [metadata] or [rule] depending on version
     meta      = data.get("metadata") or {}
@@ -740,7 +744,7 @@ def _process_elastic(source: str, rel_path: str, text: str, rule_url: str) -> tu
         source, rel_path, title, description, logic, spl, rule_url,
         mitre_techniques=techniques, mitre_tactics=tactics,
         author=author, rule_status=rule_status,
-        rule_date=rule_date, refs=refs,
+        rule_date=rule_date, refs=refs, rule_id=rule_id,
     )
     return is_new, title
 
