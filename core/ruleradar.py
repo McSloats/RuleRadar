@@ -264,12 +264,17 @@ def extract_splunk_mitre(meta: dict) -> tuple[str, str]:
     """
     Parse MITRE ATT&CK data from a Splunk security_content detection's 'tags' dict.
 
+    Technique IDs live at tags.mitre_attack_id (list of strings, e.g. ['T1059', 'T1059.001']).
+    Tactics live inside tags.mitre_attack_enrichments[].mitre_attack_tactics (plural — current
+    security_content format) or mitre_attack_tactic (singular — older files). Both are handled.
+
     Returns (pipe-joined techniques, pipe-joined tactic names).
     """
     tags = meta.get("tags") or {}
     if not isinstance(tags, dict):
         return "", ""
 
+    # ── Technique IDs ─────────────────────────────────────────────────────────
     raw_ids = tags.get("mitre_attack_id") or []
     if isinstance(raw_ids, str):
         raw_ids = [raw_ids]
@@ -281,6 +286,9 @@ def extract_splunk_mitre(meta: dict) -> tuple[str, str]:
             seen_t.add(uid)
             techniques.append(uid)
 
+    # ── Tactics from enrichments ───────────────────────────────────────────────
+    # Newer security_content uses "mitre_attack_tactics" (plural);
+    # older files used "mitre_attack_tactic" (singular). Check both.
     enrichments = tags.get("mitre_attack_enrichments") or []
     seen_ta: set[str] = set()
     tactics: list[str] = []
@@ -288,7 +296,11 @@ def extract_splunk_mitre(meta: dict) -> tuple[str, str]:
         for enr in enrichments:
             if not isinstance(enr, dict):
                 continue
-            tactic_list = enr.get("mitre_attack_tactic") or []
+            tactic_list = (
+                enr.get("mitre_attack_tactics")
+                or enr.get("mitre_attack_tactic")
+                or []
+            )
             if isinstance(tactic_list, str):
                 tactic_list = [tactic_list]
             for t in tactic_list:
