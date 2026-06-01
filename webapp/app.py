@@ -179,8 +179,9 @@ def admin_required(f):
 _REPO_GATE_SKIP = {
     "login", "logout", "setup",
     "setup_repos", "setup_repos_submit",
-    "api_repo_sizes",    # AJAX called from setup-repos to fetch size estimates
-    "api_scan_status",   # nav badge polls this even on the setup page
+    "api_repo_sizes",      # AJAX called from setup-repos to fetch size estimates
+    "api_scan_status",     # nav badge polls this even on the setup page
+    "api_dashboard_stats", # dashboard live-update poll
     "health", "static",
     # Admin routes must stay accessible so the admin can fix a broken config
     "admin", "admin_add_user",
@@ -1120,6 +1121,40 @@ def api_scan_status():
     return jsonify(result)
 
 
+@app.route("/api/dashboard/stats")
+@login_required
+def api_dashboard_stats():
+    """
+    Returns dashboard stats as JSON for the live-update poller in dashboard.html.
+    Called every 5 s while a scan is in progress so the repo cards and summary
+    bar update in real-time without a full page reload.
+    """
+    now     = datetime.now(timezone.utc)
+    cut_24h = (now - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cut_7d  = (now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    repos  = db.get_dashboard_repo_stats(cut_24h)
+    totals = db.get_dashboard_totals(cut_7d)
+
+    for repo in repos:
+        repo["last_sync_rel"] = _relative_time(repo.get("last_synced_at", ""))
+
+    next_scan  = _next_scheduled_scan()
+    delta      = next_scan - now
+    h, rem     = divmod(int(delta.total_seconds()), 3600)
+    m          = rem // 60
+    next_scan_str = f"{h}h {m:02d}m" if h else f"{m}m"
+
+    status = db.get_scan_status()
+
+    return jsonify({
+        "repos":         repos,
+        "totals":        totals,
+        "next_scan_str": next_scan_str,
+        "is_scanning":   bool(status.get("is_scanning")),
+    })
+
+
 @app.route("/api/repo-sizes")
 @login_required
 def api_repo_sizes():
@@ -1212,4 +1247,6 @@ def health():
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    # threaded=True lets concurrent requests (page loads + 15-s badge poll) be
+    # handled in parallel rather than queueing behind each other.
+    app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)

@@ -82,6 +82,8 @@ CREATE INDEX IF NOT EXISTS idx_det_source       ON detections(source);
 CREATE INDEX IF NOT EXISTS idx_det_last_updated ON detections(last_updated DESC);
 CREATE INDEX IF NOT EXISTS idx_det_mitre        ON detections(mitre_techniques);
 CREATE INDEX IF NOT EXISTS idx_det_rule_id      ON detections(rule_id);
+-- Composite: speeds up source-filtered views with date ordering
+CREATE INDEX IF NOT EXISTS idx_det_source_updated ON detections(source, last_updated);
 
 -- ── Change log (every new/modified/deleted event is appended here) ────────────
 CREATE TABLE IF NOT EXISTS updates (
@@ -96,7 +98,10 @@ CREATE TABLE IF NOT EXISTS updates (
     detected_at     TEXT    NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_upd_detected_at ON updates(detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_upd_detected_at    ON updates(detected_at DESC);
+-- Composites: speeds up source-filtered and change_type-filtered update views
+CREATE INDEX IF NOT EXISTS idx_upd_source_detected ON updates(source, detected_at);
+CREATE INDEX IF NOT EXISTS idx_upd_type_detected   ON updates(change_type, detected_at);
 
 -- ── Repo releases ──────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS releases (
@@ -360,32 +365,44 @@ def get_dashboard_repo_stats(cutoff_24h: str) -> list[dict]:
       total_rules  — number of detections indexed for this repo
       new_24h      — 'new' change events in the last 24 hours
       modified_24h — 'modified' change events in the last 24 hours
+
+    Uses two aggregate GROUP BY queries instead of N×3 individual queries so
+    cost is O(1) in the number of repos.
     """
     with get_conn() as conn:
         repos = conn.execute(
             "SELECT * FROM repos WHERE enabled = 1 ORDER BY added_at"
         ).fetchall()
+
+        # One pass over detections: total rules per source
+        totals_by_source: dict[str, int] = {
+            row[0]: row[1]
+            for row in conn.execute(
+                "SELECT source, COUNT(*) FROM detections GROUP BY source"
+            ).fetchall()
+        }
+
+        # One pass over updates: new + modified counts per source in the window
+        changes_by_source: dict[str, dict] = {}
+        for row in conn.execute(
+            """SELECT source,
+                      SUM(CASE WHEN change_type = 'new'      THEN 1 ELSE 0 END),
+                      SUM(CASE WHEN change_type = 'modified' THEN 1 ELSE 0 END)
+               FROM updates WHERE detected_at >= ? GROUP BY source""",
+            (cutoff_24h,),
+        ).fetchall():
+            changes_by_source[row[0]] = {
+                "new_24h":      row[1] or 0,
+                "modified_24h": row[2] or 0,
+            }
+
         result = []
         for repo in repos:
             name = repo["name"]
-            total = conn.execute(
-                "SELECT COUNT(*) FROM detections WHERE source = ?",
-                (name,),
-            ).fetchone()[0]
-            new_24h = conn.execute(
-                "SELECT COUNT(*) FROM updates "
-                "WHERE source = ? AND change_type = 'new' AND detected_at >= ?",
-                (name, cutoff_24h),
-            ).fetchone()[0]
-            mod_24h = conn.execute(
-                "SELECT COUNT(*) FROM updates "
-                "WHERE source = ? AND change_type = 'modified' AND detected_at >= ?",
-                (name, cutoff_24h),
-            ).fetchone()[0]
-            row = dict(repo)
-            row["total_rules"]  = total
-            row["new_24h"]      = new_24h
-            row["modified_24h"] = mod_24h
+            row  = dict(repo)
+            row["total_rules"]  = totals_by_source.get(name, 0)
+            row["new_24h"]      = changes_by_source.get(name, {}).get("new_24h", 0)
+            row["modified_24h"] = changes_by_source.get(name, {}).get("modified_24h", 0)
             result.append(row)
     return result
 

@@ -10,15 +10,15 @@
 {# ── Summary stats bar ────────────────────────────────────────────────────── #}
 <div class="dash-stats-bar">
   <div class="dash-stat-card">
-    <p class="dash-stat-value">{{ "{:,}".format(totals.total_rules) }}</p>
+    <p class="dash-stat-value" id="dash-stat-rules">{{ "{:,}".format(totals.total_rules) }}</p>
     <p class="dash-stat-label">Rules Tracked</p>
   </div>
   <div class="dash-stat-card">
-    <p class="dash-stat-value">{{ "{:,}".format(totals.events_7d) }}</p>
+    <p class="dash-stat-value" id="dash-stat-events">{{ "{:,}".format(totals.events_7d) }}</p>
     <p class="dash-stat-label">Changes (last 7 days)</p>
   </div>
   <div class="dash-stat-card">
-    <p class="dash-stat-value">{{ next_scan_str }}</p>
+    <p class="dash-stat-value" id="dash-stat-next">{{ next_scan_str }}</p>
     <p class="dash-stat-label">Next Scheduled Scan</p>
   </div>
 </div>
@@ -27,7 +27,8 @@
 {% if repos %}
 <div class="dash-repo-grid">
   {% for repo in repos %}
-  <div class="dash-repo-card {% if repo.status == 'error' %}dash-repo-card-error{% endif %}">
+  <div class="dash-repo-card {% if repo.status == 'error' %}dash-repo-card-error{% endif %}"
+       id="dash-card-{{ repo.name }}" data-status="{{ repo.status }}">
 
     {# Header: source badge + name + status dot #}
     <div class="dash-card-header">
@@ -50,17 +51,17 @@
     {# Rule count + 24h changes #}
     <div class="dash-metrics">
       <div class="dash-metric">
-        <p class="dash-metric-value">{{ "{:,}".format(repo.total_rules) }}</p>
+        <p class="dash-metric-value" data-dash="total">{{ "{:,}".format(repo.total_rules) }}</p>
         <p class="dash-metric-label">Rules</p>
       </div>
       <div class="dash-metric">
-        <p class="dash-metric-value {% if repo.new_24h > 0 %}dash-val-new{% endif %}">
+        <p class="dash-metric-value {% if repo.new_24h > 0 %}dash-val-new{% endif %}" data-dash="new24h">
           +{{ repo.new_24h }}
         </p>
         <p class="dash-metric-label">New (24h)</p>
       </div>
       <div class="dash-metric">
-        <p class="dash-metric-value {% if repo.modified_24h > 0 %}dash-val-mod{% endif %}">
+        <p class="dash-metric-value {% if repo.modified_24h > 0 %}dash-val-mod{% endif %}" data-dash="mod24h">
           ~{{ repo.modified_24h }}
         </p>
         <p class="dash-metric-label">Modified (24h)</p>
@@ -71,7 +72,7 @@
     <div class="dash-card-meta">
       <span>
         <span class="detail-label">Last sync</span>
-        {{ repo.last_sync_rel }}
+        <span data-dash="last-sync">{{ repo.last_sync_rel }}</span>
       </span>
       {% if repo.last_sha %}
       <span>
@@ -283,5 +284,96 @@
   padding-top: 0.25rem;
 }
 </style>
+
+<script>
+/* ── Dashboard live updater ──────────────────────────────────────────────────
+   Hooks into layout.html's existing refreshScanBadge() poll via the
+   window._onScanStatus callback.  When a scan is detected, fetches
+   /api/dashboard/stats every 5 s and updates stats + repo cards in place.
+   Zero extra HTTP requests when no scan is running.
+   ─────────────────────────────────────────────────────────────────────────── */
+(function () {
+  'use strict';
+
+  var _timer   = null;
+  var _prevStatuses = {};
+
+  // ── Format a number with locale thousands separators ─────────────────────
+  function fmt(n) {
+    return (typeof n === 'number') ? n.toLocaleString() : String(n || 0);
+  }
+
+  // ── Toggle a CSS class on/off ─────────────────────────────────────────────
+  function setClass(el, cls, on) {
+    if (on) { el.classList.add(cls); } else { el.classList.remove(cls); }
+  }
+
+  // ── Apply fresh JSON data to the DOM ──────────────────────────────────────
+  function applyStats(d) {
+    // Summary bar
+    var el;
+    el = document.getElementById('dash-stat-rules');  if (el) el.textContent = fmt(d.totals.total_rules);
+    el = document.getElementById('dash-stat-events'); if (el) el.textContent = fmt(d.totals.events_7d);
+    el = document.getElementById('dash-stat-next');   if (el) el.textContent = d.next_scan_str || '—';
+
+    // Per-repo cards
+    (d.repos || []).forEach(function (repo) {
+      var card = document.getElementById('dash-card-' + repo.name);
+      if (!card) return;
+
+      // Detect layout-changing status transitions and reload to re-render card HTML
+      var prev = _prevStatuses[repo.name] || card.dataset.status;
+      if (prev && prev !== repo.status) {
+        // These states have a different card body structure — need a full re-render
+        var structural = { cloning: 1, pending: 1, error: 1 };
+        if (structural[prev] || structural[repo.status]) {
+          location.reload();
+          return;
+        }
+      }
+      _prevStatuses[repo.name] = repo.status;
+      card.dataset.status = repo.status;
+
+      // Status indicator dot
+      var dot = card.querySelector('.dash-status-dot');
+      if (dot) { dot.className = 'dash-status-dot dash-status-' + repo.status; dot.title = repo.status; }
+
+      // Metric counters (only rendered when status is ready or indexing)
+      var t = card.querySelector('[data-dash="total"]');
+      var n = card.querySelector('[data-dash="new24h"]');
+      var m = card.querySelector('[data-dash="mod24h"]');
+      var s = card.querySelector('[data-dash="last-sync"]');
+
+      if (t) t.textContent = fmt(repo.total_rules);
+      if (n) { n.textContent = '+' + (repo.new_24h || 0); setClass(n, 'dash-val-new', repo.new_24h > 0); }
+      if (m) { m.textContent = '~' + (repo.modified_24h || 0); setClass(m, 'dash-val-mod', repo.modified_24h > 0); }
+      if (s && repo.last_sync_rel) s.textContent = repo.last_sync_rel;
+    });
+  }
+
+  // ── Single poll tick ──────────────────────────────────────────────────────
+  function tick() {
+    fetch('/api/dashboard/stats')
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+      .then(function (d) {
+        applyStats(d);
+        if (!d.is_scanning && _timer) {
+          clearInterval(_timer);
+          _timer = null;
+        }
+      })
+      .catch(function () {});
+  }
+
+  // ── Called by layout.html's refreshScanBadge() every 15 s ────────────────
+  window._onScanStatus = function (isScanning) {
+    if (isScanning && !_timer) {
+      tick();                           // immediate update
+      _timer = setInterval(tick, 5000); // then every 5 s
+    }
+  };
+
+})();
+</script>
 
 {% endblock %}

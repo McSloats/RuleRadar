@@ -651,6 +651,11 @@ async function refreshScanBadge() {
       badge.className  = '';
       text.textContent = 'No scan yet';
     }
+    // Allow page-specific code to react to scan status changes without
+    // making a second HTTP request.
+    if (typeof window._onScanStatus === 'function') {
+      window._onScanStatus(!!data.is_scanning);
+    }
   } catch (_) {}
 }
 
