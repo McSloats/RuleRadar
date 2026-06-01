@@ -332,6 +332,59 @@ def get_active_repos() -> list[dict]:
         return [dict(r) for r in rows]
 
 
+def get_dashboard_repo_stats(cutoff_24h: str) -> list[dict]:
+    """
+    Return per-repo stats for the dashboard, ordered by the time they were added.
+    Each dict is a repos row augmented with:
+      total_rules  — number of detections indexed for this repo
+      new_24h      — 'new' change events in the last 24 hours
+      modified_24h — 'modified' change events in the last 24 hours
+    """
+    with get_conn() as conn:
+        repos = conn.execute(
+            "SELECT * FROM repos WHERE enabled = 1 ORDER BY added_at"
+        ).fetchall()
+        result = []
+        for repo in repos:
+            name = repo["name"]
+            total = conn.execute(
+                "SELECT COUNT(*) FROM detections WHERE source = ?",
+                (name,),
+            ).fetchone()[0]
+            new_24h = conn.execute(
+                "SELECT COUNT(*) FROM updates "
+                "WHERE source = ? AND change_type = 'new' AND detected_at >= ?",
+                (name, cutoff_24h),
+            ).fetchone()[0]
+            mod_24h = conn.execute(
+                "SELECT COUNT(*) FROM updates "
+                "WHERE source = ? AND change_type = 'modified' AND detected_at >= ?",
+                (name, cutoff_24h),
+            ).fetchone()[0]
+            row = dict(repo)
+            row["total_rules"]  = total
+            row["new_24h"]      = new_24h
+            row["modified_24h"] = mod_24h
+            result.append(row)
+    return result
+
+
+def get_dashboard_totals(cutoff_7d: str) -> dict:
+    """
+    Aggregate stats across all repos for the dashboard summary bar.
+    Returns total_rules and events_7d (all change types).
+    """
+    with get_conn() as conn:
+        total_rules = conn.execute(
+            "SELECT COUNT(*) FROM detections"
+        ).fetchone()[0]
+        events_7d = conn.execute(
+            "SELECT COUNT(*) FROM updates WHERE detected_at >= ?",
+            (cutoff_7d,),
+        ).fetchone()[0]
+    return {"total_rules": total_rules, "events_7d": events_7d}
+
+
 def any_repos_configured() -> bool:
     """
     Return True if at least one repo has been enabled by an admin.

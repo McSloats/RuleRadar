@@ -1,0 +1,287 @@
+{% extends "layout.html" %}
+{% block title %}Dashboard — RuleRadar{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+  <h2>Dashboard</h2>
+</div>
+
+{# ── Summary stats bar ────────────────────────────────────────────────────── #}
+<div class="dash-stats-bar">
+  <div class="dash-stat-card">
+    <p class="dash-stat-value">{{ "{:,}".format(totals.total_rules) }}</p>
+    <p class="dash-stat-label">Rules Tracked</p>
+  </div>
+  <div class="dash-stat-card">
+    <p class="dash-stat-value">{{ "{:,}".format(totals.events_7d) }}</p>
+    <p class="dash-stat-label">Changes (last 7 days)</p>
+  </div>
+  <div class="dash-stat-card">
+    <p class="dash-stat-value">{{ next_scan_str }}</p>
+    <p class="dash-stat-label">Next Scheduled Scan</p>
+  </div>
+</div>
+
+{# ── Repository cards ─────────────────────────────────────────────────────── #}
+{% if repos %}
+<div class="dash-repo-grid">
+  {% for repo in repos %}
+  <div class="dash-repo-card {% if repo.status == 'error' %}dash-repo-card-error{% endif %}">
+
+    {# Header: source badge + name + status dot #}
+    <div class="dash-card-header">
+      <span class="badge {% if repo.name in ['sigma', 'splunk', 'elastic'] %}badge-{{ repo.name }}{% else %}badge-system{% endif %}">
+        {{ repo.name }}
+      </span>
+      <span class="dash-card-title">{{ repo.display_name }}</span>
+      <span class="dash-status-dot dash-status-{{ repo.status }}"
+            title="{{ repo.status }}"></span>
+    </div>
+
+    {# Repo identity #}
+    <p class="dash-card-repo-id">
+      {{ repo.owner }}/{{ repo.repo }}
+      <span class="text-muted">· {{ repo.branch }}</span>
+    </p>
+
+    {% if repo.status in ['ready', 'indexing'] %}
+
+    {# Rule count + 24h changes #}
+    <div class="dash-metrics">
+      <div class="dash-metric">
+        <p class="dash-metric-value">{{ "{:,}".format(repo.total_rules) }}</p>
+        <p class="dash-metric-label">Rules</p>
+      </div>
+      <div class="dash-metric">
+        <p class="dash-metric-value {% if repo.new_24h > 0 %}dash-val-new{% endif %}">
+          +{{ repo.new_24h }}
+        </p>
+        <p class="dash-metric-label">New (24h)</p>
+      </div>
+      <div class="dash-metric">
+        <p class="dash-metric-value {% if repo.modified_24h > 0 %}dash-val-mod{% endif %}">
+          ~{{ repo.modified_24h }}
+        </p>
+        <p class="dash-metric-label">Modified (24h)</p>
+      </div>
+    </div>
+
+    {# Last sync + SHA #}
+    <div class="dash-card-meta">
+      <span>
+        <span class="detail-label">Last sync</span>
+        {{ repo.last_sync_rel }}
+      </span>
+      {% if repo.last_sha %}
+      <span>
+        <span class="detail-label">SHA</span>
+        <code class="dash-sha">{{ repo.last_sha[:8] }}</code>
+      </span>
+      {% endif %}
+    </div>
+
+    {% elif repo.status == 'cloning' %}
+    <p class="dash-card-notice dash-notice-progress">⟳ Cloning repository…</p>
+
+    {% elif repo.status == 'pending' %}
+    <p class="dash-card-notice dash-notice-progress">⏳ Queued — scan will start shortly</p>
+
+    {% elif repo.status == 'error' %}
+    <p class="dash-card-notice dash-notice-error">
+      ⚠ {{ repo.error_msg[:120] if repo.error_msg else 'Unknown error' }}
+    </p>
+
+    {% else %}
+    <p class="dash-card-notice text-muted">Status: {{ repo.status }}</p>
+    {% endif %}
+
+    {# Quick links #}
+    <div class="dash-card-links">
+      <a href="{{ url_for('detections', source=repo.name) }}"
+         class="btn btn-secondary btn-sm">Detections →</a>
+      <a href="{{ url_for('updates', source=repo.name) }}"
+         class="btn btn-secondary btn-sm">Updates →</a>
+    </div>
+
+  </div>
+  {% endfor %}
+</div>
+
+{% else %}
+<div class="empty-state">
+  <p>
+    No repositories configured yet.<br>
+    {% if current_user.is_admin %}
+      <a href="{{ url_for('setup_repos') }}">Set up repositories →</a>
+    {% else %}
+      Ask your administrator to configure a repository.
+    {% endif %}
+  </p>
+</div>
+{% endif %}
+
+<style>
+/* ── Dashboard summary bar ──────────────────────────────────────────────── */
+.dash-stats-bar {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+.dash-stat-card {
+  flex: 1;
+  min-width: 160px;
+  background: #160f2a;
+  border: 1px solid #2b1e4a;
+  border-radius: 8px;
+  padding: 1.1rem 1.4rem;
+  text-align: center;
+}
+.dash-stat-value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #d4a017;
+  margin: 0 0 0.25rem;
+  letter-spacing: -0.02em;
+}
+.dash-stat-label {
+  font-size: 0.75rem;
+  color: #6a5888;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0;
+}
+
+/* ── Repository card grid ────────────────────────────────────────────────── */
+.dash-repo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1rem;
+}
+.dash-repo-card {
+  background: #160f2a;
+  border: 1px solid #2b1e4a;
+  border-radius: 8px;
+  padding: 1.1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+.dash-repo-card-error {
+  border-color: #7c1d1d;
+}
+
+/* Header row */
+.dash-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.dash-card-title {
+  flex: 1;
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: #ede8f5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dash-card-repo-id {
+  font-size: 0.78rem;
+  color: #6a5888;
+  margin: 0;
+}
+
+/* Status dot */
+.dash-status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dash-status-ready    { background: #6ee7b7; box-shadow: 0 0 5px #6ee7b740; }
+.dash-status-indexing,
+.dash-status-cloning  { background: #c4b5fd; animation: pulse 1.5s infinite; }
+.dash-status-pending  { background: #4a3860; }
+.dash-status-error    { background: #fc8181; }
+.dash-status-inactive { background: #2b1e4a; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+/* Metrics row */
+.dash-metrics {
+  display: flex;
+  gap: 0.5rem;
+}
+.dash-metric {
+  flex: 1;
+  background: #0a0716;
+  border: 1px solid #2b1e4a;
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+  text-align: center;
+}
+.dash-metric-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #ede8f5;
+  margin: 0 0 0.1rem;
+  line-height: 1.1;
+}
+.dash-metric-label {
+  font-size: 0.68rem;
+  color: #6a5888;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0;
+}
+.dash-val-new { color: #6ee7b7; }
+.dash-val-mod { color: #d4a017; }
+
+/* Meta row (last sync + SHA) */
+.dash-card-meta {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: #9080b8;
+}
+.dash-sha {
+  font-family: monospace;
+  font-size: 0.75rem;
+  background: #0a0716;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  color: #c4b5fd;
+}
+
+/* Status notices */
+.dash-card-notice {
+  font-size: 0.82rem;
+  margin: 0;
+  padding: 0.45rem 0.7rem;
+  border-radius: 5px;
+}
+.dash-notice-progress {
+  background: #1e1040;
+  color: #c4b5fd;
+}
+.dash-notice-error {
+  background: #2a0f0f;
+  color: #fc8181;
+}
+
+/* Quick links */
+.dash-card-links {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: auto;
+  padding-top: 0.25rem;
+}
+</style>
+
+{% endblock %}

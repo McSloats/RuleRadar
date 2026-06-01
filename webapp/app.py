@@ -4,7 +4,8 @@ RuleRadar web interface.
 
 Pages
 -----
-  /               → redirect to /detections (or /setup, /login)
+  /               → redirect to /dashboard (or /setup, /login)
+  /dashboard      → post-login overview: per-repo stats and summary bar
   /setup          → first-run admin account creation
   /login, /logout → authentication
   /setup-repos    → first-run repo selection (admin enables repos, starts cloning)
@@ -228,7 +229,7 @@ def login():
     if db.user_count() == 0:
         return redirect(url_for("setup"))
     if current_user.is_authenticated:
-        return redirect(url_for("detections"))
+        return redirect(url_for("dashboard"))
 
     if request.method == "POST":
         username = request.form.get("username", "").strip()
@@ -240,7 +241,7 @@ def login():
                             actor=username,
                             detail=f"ip={request.remote_addr}")
             next_page = request.args.get("next")
-            return redirect(next_page or url_for("detections"))
+            return redirect(next_page or url_for("dashboard"))
         db.log_activity("auth", f"Failed login attempt for '{username}'",
                         actor=username or "unknown",
                         detail=f"ip={request.remote_addr}",
@@ -274,9 +275,9 @@ def setup_repos():
     Once at least one repo is enabled (any status), this page is no longer
     shown as a gate — regular navigation takes over.
     """
-    # If repos are already configured redirect to detections (gate is lifted)
+    # If repos are already configured redirect to dashboard (gate is lifted)
     if db.any_repos_configured():
-        return redirect(url_for("detections"))
+        return redirect(url_for("dashboard"))
 
     configured_repos = db.get_all_repos()
     return render_template(
@@ -333,10 +334,10 @@ def setup_repos_submit():
     flash(
         f"Enabled: {', '.join(added)}. "
         "Cloning and indexing has started in the background — "
-        "this may take several minutes. Detections will appear as indexing completes.",
+        "this may take several minutes. Rules will appear once indexing completes.",
         "success",
     )
-    return redirect(url_for("detections"))
+    return redirect(url_for("dashboard"))
 
 
 # ── Main pages ─────────────────────────────────────────────────────────────────
@@ -347,7 +348,55 @@ def index():
         return redirect(url_for("setup"))
     if not current_user.is_authenticated:
         return redirect(url_for("login"))
-    return redirect(url_for("detections"))
+    return redirect(url_for("dashboard"))
+
+
+def _relative_time(ts_iso: str) -> str:
+    """Convert an ISO-format UTC timestamp to a human-readable relative string."""
+    if not ts_iso:
+        return "never"
+    try:
+        ts      = datetime.fromisoformat(ts_iso.replace("Z", "+00:00"))
+        seconds = int((datetime.now(timezone.utc) - ts).total_seconds())
+        if seconds < 60:
+            return "just now"
+        if seconds < 3600:
+            return f"{seconds // 60}m ago"
+        if seconds < 86400:
+            return f"{seconds // 3600}h ago"
+        return f"{seconds // 86400}d ago"
+    except Exception:
+        return ts_iso[:16].replace("T", " ") + " UTC"
+
+
+@app.route("/dashboard")
+@login_required
+def dashboard():
+    """Post-login overview: per-repo cards and aggregate summary stats."""
+    now     = datetime.now(timezone.utc)
+    cut_24h = (now - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cut_7d  = (now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    repos  = db.get_dashboard_repo_stats(cut_24h)
+    totals = db.get_dashboard_totals(cut_7d)
+
+    # Annotate repos with a human-readable last-sync string
+    for repo in repos:
+        repo["last_sync_rel"] = _relative_time(repo.get("last_synced_at", ""))
+
+    # Next-scan countdown
+    next_scan  = _next_scheduled_scan()
+    delta      = next_scan - now
+    h, rem     = divmod(int(delta.total_seconds()), 3600)
+    m          = rem // 60
+    next_scan_str = f"{h}h {m:02d}m" if h else f"{m}m"
+
+    return render_template(
+        "dashboard.html",
+        repos=repos,
+        totals=totals,
+        next_scan_str=next_scan_str,
+    )
 
 
 @app.route("/detections")
