@@ -50,13 +50,6 @@ except ImportError:
     YAML_AVAILABLE = False
 
 try:
-    from sigma.collection import SigmaCollection
-    from sigma.backends.splunk import SplunkBackend
-    SIGMA_BACKEND_AVAILABLE = True
-except ImportError:
-    SIGMA_BACKEND_AVAILABLE = False
-
-try:
     import tomllib                  # stdlib on Python 3.11+
     TOML_AVAILABLE = True
 except ImportError:
@@ -246,19 +239,6 @@ def sigma_detection_block(text: str) -> str:
         if inside:
             out.append(line)
     return "\n".join(out)[:600]
-
-
-def sigma_to_spl(yaml_text: str) -> str | None:
-    """Convert a Sigma rule to Splunk SPL. Returns None if conversion fails."""
-    if not SIGMA_BACKEND_AVAILABLE or not yaml_text:
-        return None
-    try:
-        rules = SigmaCollection.from_yaml(yaml_text)
-        backend = SplunkBackend()
-        results = backend.convert(rules)
-        return "\n".join(results) if results else None
-    except Exception:
-        return None
 
 
 def clean_title_fallback(fname: str) -> str:
@@ -510,231 +490,6 @@ def extract_anvilogic_mitre(meta: dict) -> tuple[str, str]:
     return "|".join(techniques), "|".join(tactics)
 
 
-# ── Elastic ECS → Splunk CIM field mapping ─────────────────────────────────────
-
-# Maps Elastic Common Schema (ECS) field names to the closest Splunk CIM equivalent.
-# Used to produce readable SPL templates from EQL/KQL Elastic detection rules.
-_ECS_TO_SPL: dict[str, str] = {
-    # Process
-    "process.name":                  "process_name",
-    "process.executable":            "process_path",
-    "process.command_line":          "process_exec",
-    "process.args":                  "process_args",
-    "process.args_count":            "process_args_count",
-    "process.pid":                   "pid",
-    "process.ppid":                  "parent_pid",
-    "process.entity_id":             "process_guid",
-    "process.parent.name":           "parent_process_name",
-    "process.parent.executable":     "parent_process_path",
-    "process.parent.pid":            "parent_pid",
-    "process.parent.command_line":   "parent_process_exec",
-    "process.hash.md5":              "process_hash",
-    "process.hash.sha256":           "process_hash",
-    "process.hash.sha1":             "process_hash",
-    "process.code_signature.status": "signature_status",
-    "process.code_signature.trusted": "signature_trusted",
-    # Host
-    "host.name":                     "host",
-    "host.hostname":                 "host",
-    "host.os.type":                  "os",
-    "host.os.name":                  "os_name",
-    "host.ip":                       "host_ip",
-    # User
-    "user.name":                     "user",
-    "user.domain":                   "user_domain",
-    "user.id":                       "user_id",
-    # Network
-    "destination.ip":                "dest_ip",
-    "destination.port":              "dest_port",
-    "destination.domain":            "dest",
-    "destination.address":           "dest",
-    "destination.bytes":             "bytes_out",
-    "source.ip":                     "src_ip",
-    "source.port":                   "src_port",
-    "source.address":                "src",
-    "source.bytes":                  "bytes_in",
-    "network.protocol":              "app",
-    "network.transport":             "transport",
-    "network.direction":             "direction",
-    "network.bytes":                 "bytes",
-    "network.community_id":          "network_id",
-    # File
-    "file.name":                     "file_name",
-    "file.path":                     "file_path",
-    "file.extension":                "file_extension",
-    "file.directory":                "file_dir",
-    "file.hash.md5":                 "file_hash",
-    "file.hash.sha256":              "file_hash",
-    "file.hash.sha1":                "file_hash",
-    "file.pe.imphash":               "imphash",
-    "file.size":                     "file_size",
-    # DNS
-    "dns.question.name":             "query",
-    "dns.question.type":             "record_type",
-    "dns.answers.data":              "answer",
-    "dns.answers.type":              "record_type",
-    # URL / HTTP
-    "url.full":                      "url",
-    "url.domain":                    "url_domain",
-    "url.path":                      "uri_path",
-    "url.query":                     "uri_query",
-    "http.request.method":           "http_method",
-    "http.response.status_code":     "status",
-    "http.request.body.bytes":       "bytes_in",
-    "http.response.body.bytes":      "bytes_out",
-    # Windows event log
-    "winlog.event_id":               "EventCode",
-    "winlog.task":                   "TaskCategory",
-    "winlog.channel":                "Channel",
-    "winlog.provider_name":          "SourceName",
-    "winlog.record_id":              "RecordNumber",
-    "winlog.computer_name":          "ComputerName",
-    # Registry
-    "registry.path":                 "registry_path",
-    "registry.key":                  "registry_key_name",
-    "registry.value.name":           "registry_value_name",
-    "registry.value.data":           "registry_value_data",
-    "registry.value.type":           "registry_value_type",
-    "registry.hive":                 "registry_hive",
-    # Event metadata
-    "event.action":                  "action",
-    "event.category":                "category",
-    "event.code":                    "EventCode",
-    "event.type":                    "type",
-    "event.outcome":                 "result",
-    "event.dataset":                 "source",
-    # Service
-    "service.name":                  "service_name",
-    "service.type":                  "service_type",
-    # TLS / certificates
-    "tls.client.ja3":                "ja3",
-    "tls.server.ja3s":               "ja3s",
-    "tls.server.certificate.subject": "ssl_subject",
-    # Email
-    "email.from.address":            "src_user",
-    "email.to.address":              "recipient",
-    "email.subject":                 "subject",
-    # Cloud
-    "cloud.provider":                "cloud_provider",
-    "cloud.account.id":              "account_id",
-    "cloud.region":                  "region",
-}
-
-
-def _apply_ecs_mapping(query: str) -> str:
-    """Replace ECS field names with Splunk CIM equivalents (longest match first)."""
-    for ecs, spl_field in sorted(_ECS_TO_SPL.items(), key=lambda x: -len(x[0])):
-        query = query.replace(ecs, spl_field)
-    return query
-
-
-def _guess_splunk_index(rule: dict) -> str:
-    """Suggest a Splunk index based on Elastic rule tags and index patterns."""
-    tags  = [str(t).lower() for t in (rule.get("tags") or [])]
-    index = [str(i).lower() for i in (rule.get("index") or [])]
-    if any("windows" in t for t in tags) or any("winlog" in i or "windows" in i for i in index):
-        return "index=wineventlog OR index=sysmon"
-    if any("linux" in t for t in tags) or any("auditd" in i or "syslog" in i for i in index):
-        return "index=linux_secure OR index=syslog"
-    if any("macos" in t for t in tags):
-        return "index=osquery OR index=endpoint"
-    if any("network" in t for t in tags) or any("flow" in i or "zeek" in i for i in index):
-        return "index=netflow OR index=zeek"
-    if any("aws" in t or "azure" in t or "gcp" in t or "cloud" in t for t in tags):
-        return "index=cloudtrail OR index=azure_activity OR index=gcp_audit"
-    return "index=*"
-
-
-def _eql_to_spl(query: str, rule: dict) -> str:
-    """Convert an EQL query to a best-effort Splunk SPL template."""
-    mapped = _apply_ecs_mapping(query)
-    index  = _guess_splunk_index(rule)
-
-    # EQL sequence → multi-event SPL hint (transaction or join)
-    if re.search(r"\bsequence\b", mapped, re.IGNORECASE):
-        lines = [
-            "* EQL sequence — use transaction or join in Splunk",
-            index,
-        ]
-        for line in mapped.splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("[") or stripped.startswith("by "):
-                continue
-            # Drop event-category prefix ("process where", "network where", etc.)
-            stripped = re.sub(r"^\w+\s+where\s+", "", stripped, flags=re.IGNORECASE)
-            stripped = re.sub(r"\s*==\s*", "=", stripped)
-            stripped = re.sub(r"\s+and\s+", " AND ", stripped, flags=re.IGNORECASE)
-            stripped = re.sub(r"\s+or\s+", " OR ",  stripped, flags=re.IGNORECASE)
-            stripped = re.sub(r"(?<!\w)not\s+", "NOT ", stripped, flags=re.IGNORECASE)
-            lines.append(f"| search {stripped}")
-        return "\n".join(lines)
-
-    # Standard EQL event query
-    normalized = re.sub(r"^\w+\s+where\s+", "", mapped.strip(), flags=re.IGNORECASE)
-    normalized = re.sub(r"\s*==\s*",  "=",   normalized)
-    normalized = re.sub(r"\s*!=\s*",  "!=",  normalized)
-    normalized = re.sub(r"\s+like~?\s+", " LIKE ", normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r"\s+and\s+", " AND ", normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r"\s+or\s+",  " OR ",  normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r"(?<!\w)not\s+", "NOT ", normalized, flags=re.IGNORECASE)
-
-    return f"{index}\n| search {normalized}"
-
-
-def _kuery_to_spl(query: str, rule: dict) -> str:
-    """Convert a KQL / Lucene query to a best-effort Splunk SPL template."""
-    mapped = _apply_ecs_mapping(query)
-    index  = _guess_splunk_index(rule)
-
-    # KQL field:value  →  SPL field=value
-    normalized = re.sub(r'(\w[\w._-]*)\s*:\s*"([^"]*)"', r'\1="\2"', mapped)
-    normalized = re.sub(r'(\w[\w._-]*)\s*:\s*([^\s()]+)', r'\1=\2', normalized)
-    # Boolean operators
-    normalized = re.sub(r"\band\b", "AND", normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r"\bor\b",  "OR",  normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r"\bnot\b", "NOT", normalized, flags=re.IGNORECASE)
-
-    return f"{index}\n| search {normalized}"
-
-
-def elastic_to_spl(rule: dict) -> str:
-    """
-    Generate a best-effort Splunk SPL template from an Elastic rule dict
-    (the [rule] section of a parsed TOML file).
-
-    Output is clearly marked as a template requiring review — it is NOT a
-    verified, production-ready query.  Field names are translated from ECS
-    to Splunk CIM conventions; index hints are derived from rule tags.
-    Returns an empty string if the rule has no query.
-    """
-    query    = str(rule.get("query", "")).strip()
-    language = str(rule.get("language", "kuery")).lower()
-    if not query:
-        return ""
-
-    try:
-        if language == "eql":
-            body = _eql_to_spl(query, rule)
-        elif language in ("kuery", "lucene"):
-            body = _kuery_to_spl(query, rule)
-        elif language == "esql":
-            # ES|QL has pipeline syntax similar to SPL but different semantics
-            body = (
-                "* ES|QL — manual conversion required\n"
-                + _apply_ecs_mapping(query)
-            )
-        else:
-            body = f"index=*\n| search {_apply_ecs_mapping(query)}"
-
-        return (
-            f"* SPL TEMPLATE — auto-translated from Elastic {language.upper()}\n"
-            "* Review field names and index expressions before use in production\n"
-            f"{body}"
-        )
-    except Exception:
-        return ""
-
-
 # ── Git helpers ────────────────────────────────────────────────────────────────
 
 def git_run(args: list[str], cwd: str | None = None, timeout: int = 600) -> tuple[int, str]:
@@ -768,7 +523,6 @@ def _process_sigma(source: str, rel_path: str, text: str, rule_url: str) -> tupl
     Returns (is_new, title).
     """
     meta  = parse_yaml(text)
-    spl   = sigma_to_spl(text)
     logic = sigma_detection_block(text)
 
     title       = str(meta.get("title",       "")).strip() or clean_title_fallback(rel_path)
@@ -785,7 +539,7 @@ def _process_sigma(source: str, rel_path: str, text: str, rule_url: str) -> tupl
     techniques, tactics = extract_sigma_mitre(meta)
 
     is_new = db.upsert_detection(
-        source, rel_path, title, description, logic, spl or "", rule_url,
+        source, rel_path, title, description, logic, "", rule_url,
         mitre_techniques=techniques, mitre_tactics=tactics,
         author=author, rule_status=rule_status,
         rule_date=rule_date, refs=refs, rule_id=rule_id,
@@ -882,13 +636,10 @@ def _process_elastic(source: str, rel_path: str, text: str, rule_url: str) -> tu
     language = str(rule.get("language", "")).upper()
     logic    = (f"[{language}]\n{query}" if language else query)[:600]
 
-    # SPL template generated from the Elastic query
-    spl = elastic_to_spl(rule) or ""
-
     techniques, tactics = extract_elastic_mitre(rule)
 
     is_new = db.upsert_detection(
-        source, rel_path, title, description, logic, spl, rule_url,
+        source, rel_path, title, description, logic, "", rule_url,
         mitre_techniques=techniques, mitre_tactics=tactics,
         author=author, rule_status=rule_status,
         rule_date=rule_date, refs=refs, rule_id=rule_id,
@@ -1405,7 +1156,7 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int]:
             # Build appropriate logic/spl for the update record
             if parser == "sigma":
                 logic   = sigma_detection_block(text)
-                spl_val = sigma_to_spl(text) or ""
+                spl_val = ""
             elif parser == "elastic" and TOML_AVAILABLE:
                 try:
                     _edata   = tomllib.loads(text)
@@ -1413,7 +1164,7 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int]:
                     _q       = str(_erule.get("query", "")).strip()
                     _lang    = str(_erule.get("language", "")).upper()
                     logic    = (f"[{_lang}]\n{_q}" if _lang else _q)[:600]
-                    spl_val  = elastic_to_spl(_erule) or ""
+                    spl_val  = ""
                 except Exception:
                     logic   = ""
                     spl_val = ""
@@ -1506,12 +1257,6 @@ def run_scan(triggered_by: str = "scheduler") -> dict:
             print(
                 "  WARNING: pyyaml not installed — using basic parser. "
                 "Run: pip install -r requirements.txt",
-                flush=True,
-            )
-        if not SIGMA_BACKEND_AVAILABLE:
-            print(
-                "  WARNING: pySigma-backend-splunk not installed — "
-                "Sigma→SPL conversion disabled. Run: pip install -r requirements.txt",
                 flush=True,
             )
         if not TOML_AVAILABLE:

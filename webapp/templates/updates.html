@@ -205,17 +205,12 @@ function toggleFilterPanel() {
               <pre>{{ row.spl }}</pre>
             {% endif %}
           {% elif row.source == 'elastic' %}
-            {# Elastic: EQL/KQL/ES|QL query first, then auto-translated SPL template #}
             {% if row.detection_logic %}
               <p class="detail-label">Detection Logic (EQL / KQL)</p>
               <pre>{{ row.detection_logic }}</pre>
             {% endif %}
-            {% if row.spl %}
-              <p class="detail-label">Splunk SPL (auto-translated)</p>
-              <pre>{{ row.spl }}</pre>
-            {% endif %}
           {% else %}
-            {# Sigma / other: native detection block first, then optional SPL translation #}
+            {# Sigma / other: native detection block #}
             {% if row.detection_logic %}
               <p class="detail-label">Detection Logic</p>
               <pre>{{ row.detection_logic }}</pre>

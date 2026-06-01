@@ -16,8 +16,7 @@ Monitors detection rule repositories — [SigmaHQ/sigma](https://github.com/Sigm
 Every two hours RuleRadar:
 1. Fetches changes from all configured repos via `git fetch` and diffs against the last known commit
 2. Parses new and modified rule files — `.yml`/`.yaml` (Sigma, Splunk) and `.toml` (Elastic)
-3. Converts Sigma rules to Splunk SPL via `pySigma-backend-splunk`; generates best-effort SPL templates for Elastic EQL/KQL rules using ECS→Splunk CIM field mappings
-4. Persists every detection and change event to SQLite
+3. Persists every detection and change event to SQLite
 5. Sends a summary to every user who has a personal Discord webhook configured
 
 The web interface provides:

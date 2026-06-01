@@ -1,6 +1,5 @@
 # Core monitor
 pyyaml>=6.0,<7.0
-pySigma-backend-splunk>=0.9,<2.0
 tomli>=2.0,<3.0; python_version < "3.11"  # TOML parsing for Elastic rules (stdlib tomllib on 3.11+)
 
 # Web interface + auth
