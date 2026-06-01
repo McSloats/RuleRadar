@@ -616,7 +616,6 @@ def _process_sigma(source: str, rel_path: str, text: str, rule_url: str) -> tupl
     description = str(meta.get("description", ""))[:350]
     author      = str(meta.get("author",      ""))[:200]
     rule_status = str(meta.get("status",      ""))[:50]
-    severity    = str(meta.get("level",       ""))[:50]
     rule_date   = str(meta.get("date",        ""))[:20]
     refs_raw    = meta.get("references") or []
     refs        = (
@@ -628,7 +627,7 @@ def _process_sigma(source: str, rel_path: str, text: str, rule_url: str) -> tupl
     is_new = db.upsert_detection(
         source, rel_path, title, description, logic, spl or "", rule_url,
         mitre_techniques=techniques, mitre_tactics=tactics,
-        author=author, rule_status=rule_status, severity=severity,
+        author=author, rule_status=rule_status,
         rule_date=rule_date, refs=refs,
     )
     return is_new, title
@@ -663,7 +662,7 @@ def _process_splunk(source: str, rel_path: str, text: str, rule_url: str) -> tup
     is_new = db.upsert_detection(
         source, rel_path, title, description, "", search[:500], rule_url,
         mitre_techniques=techniques, mitre_tactics=tactics,
-        author=author, rule_status=rule_status, severity="",
+        author=author, rule_status=rule_status,
         rule_date=rule_date, refs=refs,
     )
     return is_new, title
@@ -704,7 +703,6 @@ def _process_elastic(source: str, rel_path: str, text: str, rule_url: str) -> tu
 
     # Maturity ("stable" / "production") doubles as rule status in Elastic rules
     rule_status = str(rule.get("maturity", "") or rule.get("status", ""))[:50]
-    severity    = str(rule.get("severity", ""))[:50]
 
     # Creation date — lives in [metadata] or [rule] depending on version
     meta      = data.get("metadata") or {}
@@ -729,7 +727,7 @@ def _process_elastic(source: str, rel_path: str, text: str, rule_url: str) -> tu
     is_new = db.upsert_detection(
         source, rel_path, title, description, logic, spl, rule_url,
         mitre_techniques=techniques, mitre_tactics=tactics,
-        author=author, rule_status=rule_status, severity=severity,
+        author=author, rule_status=rule_status,
         rule_date=rule_date, refs=refs,
     )
     return is_new, title

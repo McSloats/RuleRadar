@@ -356,7 +356,6 @@ def detections():
     """Searchable table of all known detection rules."""
     title       = request.args.get("title",       "").strip()
     description = request.args.get("description", "").strip()
-    severity    = request.args.get("severity",    "").strip().lower()
     source      = request.args.get("source",      "")
     mitre       = request.args.get("mitre",       "").strip()
     days        = request.args.get("days",        "")
@@ -365,7 +364,7 @@ def detections():
     per_page    = 50
 
     rows, total = db.search_detections(
-        title=title, description=description, severity=severity,
+        title=title, description=description,
         source=source, mitre=mitre, days=days, details_q=details_q,
         page=page, per_page=per_page,
     )
@@ -375,7 +374,7 @@ def detections():
         "detections.html",
         rows=rows, total=total,
         page=page, total_pages=total_pages,
-        title=title, description=description, severity=severity,
+        title=title, description=description,
         source=source, mitre=mitre, days=days, details_q=details_q,
         saved_filters=_get_saved_filters(),
     )
@@ -513,7 +512,6 @@ def settings_filters_add():
     change_type = request.form.get("change_type", "")
     title       = request.form.get("title",       "").strip()
     mitre       = request.form.get("mitre",       "").strip()
-    severity    = request.form.get("severity",    "")
     days        = request.form.get("days",        "")
 
     if not name:
@@ -537,15 +535,13 @@ def settings_filters_add():
         "change_type": change_type,
         "title":       title,
         "mitre":       mitre,
-        "severity":    severity,
         "days":        days,
     })
     db.update_user_filters(current_user.id, json.dumps(filters))
     db.log_activity("user", f"Saved filter '{name}' added", actor=current_user.username,
                     detail=(
                         f"source={source or 'all'}, change_type={change_type or 'all'}, "
-                        f"title={title or ''}, mitre={mitre or ''}, "
-                        f"severity={severity or ''}, days={days or ''}"
+                        f"title={title or ''}, mitre={mitre or ''}, days={days or ''}"
                     ))
     flash(f"Filter \"{name}\" saved.", "success")
     return redirect(url_for("settings"))

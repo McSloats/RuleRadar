@@ -58,7 +58,7 @@ All clones live at `REPOS_DIR = db.DB_PATH.parent / "repos"` (i.e. `/app/data/re
 
 ### Database schema (`core/database.py`)
 Key tables:
-- **`detections`** — current state of every known rule: `source`, `file_path`, `title`, `description`, `detection_logic`, `spl`, `author`, `rule_status`, `severity`, `rule_date`, `refs`, `mitre_techniques`, `mitre_tactics`, `rule_url`
+- **`detections`** — current state of every known rule: `source`, `file_path`, `title`, `description`, `detection_logic`, `spl`, `author`, `rule_status`, `rule_date`, `refs`, `mitre_techniques`, `mitre_tactics`, `rule_url`
 - **`updates`** — append-only change log: `source`, `file_path`, `title`, `change_type` (new/modified/deleted/renamed), `detection_logic`, `spl`, `rule_url`, `detected_at`
 - **`repos`** — monitored repositories with status machine: `pending → cloning → indexing → ready / error`
 - **`scan_status`** — singleton row tracking last scan time and `is_scanning` flag
@@ -99,7 +99,7 @@ Form field wrappers must use `class="form-group"` (not `form-field` — that cla
 
 **Badge classes for activity log categories:** `.badge-auth`, `.badge-admin`, `.badge-user`, `.badge-system`, `.badge-new` (scan). Level badges: `.badge-deleted` (error/red), `.badge-warning` (warning/gold), `.badge-user` (info).
 
-**Saved filters** are stored as a JSON array in `user_settings.saved_filters`. Each filter object has keys: `id`, `name`, `source`, `change_type`, `title`, `mitre`, `severity`, `days`. Preset buttons on the Detections page pass all fields; Updates page presets omit `severity` (not applicable there). Old filters lacking new keys are read safely via `f.get('key', '')`.
+**Saved filters** are stored as a JSON array in `user_settings.saved_filters`. Each filter object has keys: `id`, `name`, `source`, `change_type`, `title`, `mitre`, `days`. Old filters with a stale `severity` key are harmless — they are silently ignored.
 
 ### Static assets
 - `webapp/static/icon.svg` — Shield Radar icon (44×48), used in nav and auth page headers

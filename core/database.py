@@ -72,7 +72,6 @@ CREATE TABLE IF NOT EXISTS detections (
     mitre_tactics    TEXT    NOT NULL DEFAULT '',
     author           TEXT    NOT NULL DEFAULT '',
     rule_status      TEXT    NOT NULL DEFAULT '',
-    severity         TEXT    NOT NULL DEFAULT '',
     rule_date        TEXT    NOT NULL DEFAULT '',
     refs             TEXT    NOT NULL DEFAULT '',
     UNIQUE(source, file_path)
@@ -169,7 +168,6 @@ def _migrate_schema(conn: sqlite3.Connection):
         "ALTER TABLE detections ADD COLUMN mitre_tactics    TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE detections ADD COLUMN author           TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE detections ADD COLUMN rule_status      TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE detections ADD COLUMN severity         TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE detections ADD COLUMN rule_date        TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE detections ADD COLUMN refs             TEXT NOT NULL DEFAULT ''",
     ]
@@ -440,7 +438,6 @@ def upsert_detection(
     mitre_tactics: str = "",
     author: str = "",
     rule_status: str = "",
-    severity: str = "",
     rule_date: str = "",
     refs: str = "",
 ) -> bool:
@@ -463,12 +460,12 @@ def upsert_detection(
                    SET title=?, description=?, detection_logic=?, spl=?,
                        rule_url=?, last_updated=?,
                        mitre_techniques=?, mitre_tactics=?,
-                       author=?, rule_status=?, severity=?, rule_date=?, refs=?
+                       author=?, rule_status=?, rule_date=?, refs=?
                    WHERE source=? AND file_path=?""",
                 (
                     title, description, detection_logic, spl, rule_url, ts,
                     mitre_techniques, mitre_tactics,
-                    author, rule_status, severity, rule_date, refs,
+                    author, rule_status, rule_date, refs,
                     source, file_path,
                 ),
             )
@@ -478,13 +475,13 @@ def upsert_detection(
                (source, file_path, title, description, detection_logic, spl,
                 rule_url, first_seen, last_updated,
                 mitre_techniques, mitre_tactics,
-                author, rule_status, severity, rule_date, refs)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,  ?, ?,  ?, ?, ?, ?, ?)""",
+                author, rule_status, rule_date, refs)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,  ?, ?,  ?, ?, ?, ?)""",
             (
                 source, file_path, title, description, detection_logic, spl,
                 rule_url, ts, ts,
                 mitre_techniques, mitre_tactics,
-                author, rule_status, severity, rule_date, refs,
+                author, rule_status, rule_date, refs,
             ),
         )
         return True
@@ -502,7 +499,6 @@ def delete_detection(source: str, file_path: str):
 def search_detections(
     title: str = "",
     description: str = "",
-    severity: str = "",
     source: str = "",
     mitre: str = "",
     days: str = "",
@@ -514,8 +510,7 @@ def search_detections(
     Search detections with per-field filters and a detail-panel keyword search.
     - title       : searches title only
     - description : searches description only
-    - severity    : exact match ('critical'|'high'|'medium'|'low'|'informational'|'')
-    - source      : 'sigma' | 'splunk' | '' (all)
+    - source      : 'sigma' | 'splunk' | 'elastic' | '' (all)
     - mitre       : searches mitre_techniques and mitre_tactics (e.g. 'T1059' or 'Execution')
     - days        : '7'|'30'|'90'|'' — limit to rules updated in the last N days
     - details_q   : keyword across detection_logic, spl, author, rule_status, rule_date, refs
@@ -528,9 +523,6 @@ def search_detections(
     if description:
         conditions.append("description LIKE ?")
         params.append(f"%{description}%")
-    if severity:
-        conditions.append("LOWER(severity) = ?")
-        params.append(severity.lower())
     if source:
         conditions.append("source = ?")
         params.append(source)
