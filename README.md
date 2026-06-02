@@ -8,7 +8,7 @@
 Monitors detection rule repositories — [SigmaHQ/sigma](https://github.com/SigmaHQ/sigma), [splunk/security_content](https://github.com/splunk/security_content), and [elastic/detection-rules](https://github.com/elastic/detection-rules) — for new, modified, deleted, and renamed rules. All data is stored in a local SQLite database and browsable through a built-in web interface. No config files required — everything is configured through the web UI.
 
 <p align="center">
-  <img src="docs/Homepage.png" alt="RuleRadar — Dashboard" width="900">
+  <img src="docs/Dashboard.png" alt="RuleRadar — Dashboard" width="900">
 </p>
 
 ## What it does
