@@ -858,42 +858,47 @@ def get_updates(
     user_filter_rows: list | None = None,
 ) -> tuple[list[dict], int]:
     """
-    Return paginated update events, newest first.
+    Return paginated update events and GitHub releases, newest first.
 
-    Each row is augmented with metadata from the current detections table
-    (author, rule_status, rule_date, description, refs) via a LEFT JOIN so
-    that the expand panel can show full rule context.  Deleted rules will
-    have empty strings for those fields.
+    Rule-change rows are augmented with metadata from detections via LEFT JOIN.
+    Release rows carry tag_name and body; rule-only fields are empty/NULL.
 
     - source      : 'sigma' | 'splunk' | '' (all)
-    - change_type : 'new' | 'modified' | 'deleted' | 'renamed' | ''
-    - title       : keyword search on title
+    - change_type : 'new' | 'modified' | 'deleted' | 'renamed' | 'release' | ''
+    - title       : keyword search on title / release name
     - days        : '7'|'30'|'90'|'' — limit to events detected in the last N days
-    - details_q   : keyword across description, detection_logic, spl, author, rule_status,
-                    rule_date, refs (joined from detections for non-deleted rules)
+    - details_q   : keyword across rule fields + release body
     """
-    conds, params = [], []
-    if source:
-        conds.append("u.source = ?")
-        params.append(source)
-    if change_type:
-        conds.append("u.change_type = ?")
-        params.append(change_type)
-    if title:
-        conds.append("u.title LIKE ?")
-        params.append(f"%{title}%")
+    show_updates  = change_type != "release"
+    show_releases = change_type in ("", "release")
+
+    # Pre-compute cutoff once — shared by both sides
+    cutoff = None
     if days:
         try:
             cutoff = (
                 datetime.now(timezone.utc) - timedelta(days=int(days))
             ).strftime("%Y-%m-%dT%H:%M:%SZ")
-            conds.append("u.detected_at >= ?")
-            params.append(cutoff)
         except ValueError:
             pass
+
+    # ── Updates side ────────────────────────────────────────────────────────────
+    u_conds, u_params = [], []
+    if source:
+        u_conds.append("u.source = ?")
+        u_params.append(source)
+    if change_type and change_type != "release":
+        u_conds.append("u.change_type = ?")
+        u_params.append(change_type)
+    if title:
+        u_conds.append("u.title LIKE ?")
+        u_params.append(f"%{title}%")
+    if cutoff:
+        u_conds.append("u.detected_at >= ?")
+        u_params.append(cutoff)
     if details_q:
         like = f"%{details_q}%"
-        conds.append(
+        u_conds.append(
             "(u.detection_logic LIKE ? OR u.spl LIKE ?"
             " OR COALESCE(d.author,      '') LIKE ?"
             " OR COALESCE(d.rule_status, '') LIKE ?"
@@ -901,10 +906,9 @@ def get_updates(
             " OR COALESCE(d.description, '') LIKE ?"
             " OR COALESCE(d.refs,        '') LIKE ?)"
         )
-        params += [like, like, like, like, like, like, like]
+        u_params += [like, like, like, like, like, like, like]
 
-    # Per-user persistent rule filter.  For updates we match against u.title /
-    # u.source; rule_id is matched against the joined detections.rule_id.
+    # Per-user persistent rule filter — does not apply to releases
     if user_filter_rows:
         row_clauses, row_params = [], []
         for frow in user_filter_rows:
@@ -922,28 +926,70 @@ def get_updates(
                 row_clauses.append("(" + " AND ".join(fconds) + ")")
                 row_params.extend(fp)
         if row_clauses:
-            conds.append("(" + " OR ".join(row_clauses) + ")")
-            params.extend(row_params)
+            u_conds.append("(" + " OR ".join(row_clauses) + ")")
+            u_params.extend(row_params)
 
-    where = ("WHERE " + " AND ".join(conds)) if conds else ""
-    join  = "LEFT JOIN detections d ON d.source = u.source AND d.file_path = u.file_path"
+    join    = "LEFT JOIN detections d ON d.source = u.source AND d.file_path = u.file_path"
+    u_where = ("WHERE " + " AND ".join(u_conds)) if u_conds else ""
+
+    updates_sql = (
+        f"SELECT u.id, u.source, u.file_path, u.title, u.change_type,"
+        f"       u.detection_logic, u.spl, u.rule_url, u.detected_at,"
+        f"       COALESCE(d.author,      '') AS author,"
+        f"       COALESCE(d.rule_status, '') AS rule_status,"
+        f"       COALESCE(d.rule_date,   '') AS rule_date,"
+        f"       COALESCE(d.description, '') AS description,"
+        f"       COALESCE(d.refs,        '') AS refs,"
+        f"       NULL AS tag_name, NULL AS body"
+        f" FROM updates u {join} {u_where}"
+    )
+
+    # ── Releases side ────────────────────────────────────────────────────────────
+    r_conds, r_params = [], []
+    if source:
+        r_conds.append("r.source = ?")
+        r_params.append(source)
+    if title:
+        r_conds.append("r.name LIKE ?")
+        r_params.append(f"%{title}%")
+    if cutoff:
+        r_conds.append("r.detected_at >= ?")
+        r_params.append(cutoff)
+    if details_q:
+        r_conds.append("r.body LIKE ?")
+        r_params.append(f"%{details_q}%")
+
+    r_where = ("WHERE " + " AND ".join(r_conds)) if r_conds else ""
+
+    releases_sql = (
+        f"SELECT r.id, r.source, NULL AS file_path, r.name AS title,"
+        f"       'release' AS change_type,"
+        f"       NULL AS detection_logic, NULL AS spl,"
+        f"       r.html_url AS rule_url, r.detected_at,"
+        f"       '' AS author, '' AS rule_status, '' AS rule_date,"
+        f"       '' AS description, '' AS refs,"
+        f"       r.tag_name, r.body"
+        f" FROM releases r {r_where}"
+    )
+
+    # ── Combine ──────────────────────────────────────────────────────────────────
+    if show_updates and show_releases:
+        combined   = f"{updates_sql} UNION ALL {releases_sql}"
+        all_params = u_params + r_params
+    elif show_updates:
+        combined   = updates_sql
+        all_params = u_params
+    else:
+        combined   = releases_sql
+        all_params = r_params
 
     with get_conn() as conn:
         total = conn.execute(
-            f"SELECT COUNT(*) FROM updates u {join} {where}", params
+            f"SELECT COUNT(*) FROM ({combined})", all_params
         ).fetchone()[0]
         rows = conn.execute(
-            f"""SELECT u.*,
-                       COALESCE(d.author,      '') AS author,
-                       COALESCE(d.rule_status, '') AS rule_status,
-                       COALESCE(d.rule_date,   '') AS rule_date,
-                       COALESCE(d.description, '') AS description,
-                       COALESCE(d.refs,        '') AS refs
-                FROM updates u
-                {join}
-                {where}
-                ORDER BY u.detected_at DESC LIMIT ? OFFSET ?""",
-            params + [limit, offset],
+            f"SELECT * FROM ({combined}) ORDER BY detected_at DESC LIMIT ? OFFSET ?",
+            all_params + [limit, offset],
         ).fetchall()
 
     return [dict(r) for r in rows], total
@@ -1019,6 +1065,15 @@ def log_activity(
             (now_iso(), category, level, actor, action, detail),
         )
 
+
+
+def prune_activity_log(keep_days: int = 180):
+    """Delete activity log entries older than keep_days days."""
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(days=keep_days)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with get_conn() as conn:
+        conn.execute("DELETE FROM activity_log WHERE timestamp < ?", (cutoff,))
 
 
 def get_activity_log(

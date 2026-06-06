@@ -1139,6 +1139,12 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int]:
             flush=True,
         )
         index_repo(repo_cfg)
+        db.log_activity(
+            "scan", f"Full re-index performed for {name}",
+            actor="system",
+            detail="git diff unavailable (shallow history may have been garbage-collected) — re-indexed to keep DB consistent",
+            level="warning",
+        )
         db.update_repo_sha(name, new_sha)
         return 0, 0, []  # counts not meaningful for full re-index
 
@@ -1190,6 +1196,7 @@ def run_scan(triggered_by: str = "scheduler") -> dict:
 
     try:
         db.set_scanning(True)
+        db.prune_activity_log(keep_days=180)
         _tz_name  = db.get_app_setting("timezone", "UTC")
         try:
             _tz = ZoneInfo(_tz_name)
@@ -1278,12 +1285,11 @@ def run_scan(triggered_by: str = "scheduler") -> dict:
             except Exception as e:
                 print(f"  [{repo_cfg['name']}] Releases fetch error: {e}", file=sys.stderr)
 
-        db.finish_scan(total_new, total_mod)
-
         summary_str = " | ".join(repo_summary)
         print(f"  Summary: {summary_str}", flush=True)
         print("Done.", flush=True)
 
+        db.finish_scan(total_new, total_mod)
         db.log_activity(
             "scan",
             f"Scan complete — {total_new} new, {total_mod} modified",
@@ -1291,7 +1297,8 @@ def run_scan(triggered_by: str = "scheduler") -> dict:
             detail=summary_str,
         )
 
-        # Discord notifications (only when there is something to report)
+        # Discord notifications (only when there is something to report).
+        # Each webhook is isolated — one failure does not abort the rest.
         if total_new + total_mod > 0:
             site_url = os.environ.get("RULERADAR_SITE_URL", "").rstrip("/")
             msg_parts = [f"**RuleRadar — {timestamp}**"]
@@ -1305,7 +1312,14 @@ def run_scan(triggered_by: str = "scheduler") -> dict:
                 msg_parts.append(f"\n🔗 View updates: {site_url}/updates")
             msg = "\n".join(msg_parts)
             for webhook_url in db.get_all_user_webhooks():
-                send_discord(webhook_url, msg)
+                try:
+                    send_discord(webhook_url, msg)
+                except Exception as disc_err:
+                    print(f"  Discord notification failed: {disc_err}", file=sys.stderr)
+                    db.log_activity(
+                        "scan", "Discord notification failed",
+                        actor=triggered_by, detail=str(disc_err), level="warning",
+                    )
 
         return {"new": total_new, "modified": total_mod, "skipped": False}
 

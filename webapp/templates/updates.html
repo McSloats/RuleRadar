@@ -102,6 +102,7 @@
           <option value="modified" {% if change_type == 'modified' %}selected{% endif %}>Modified</option>
           <option value="deleted"  {% if change_type == 'deleted'  %}selected{% endif %}>Deleted</option>
           <option value="renamed"  {% if change_type == 'renamed'  %}selected{% endif %}>Renamed</option>
+          <option value="release"  {% if change_type == 'release'  %}selected{% endif %}>Release</option>
         </select>
       </div>
       <div class="filter-panel-field">
@@ -177,6 +178,24 @@ function toggleFilterPanel() {
       <tr class="detail-row">
         <td colspan="6">
 
+          {% if row.change_type == 'release' %}
+
+          {# ── Release detail ── #}
+          <div class="detail-meta">
+            <span><span class="detail-label">Tag</span>{{ row.tag_name }}</span>
+            <span><span class="detail-label">Repo</span>{{ row.source }}</span>
+          </div>
+          {% if row.body %}
+            <p class="detail-label">Release Notes</p>
+            <pre>{{ row.body }}</pre>
+          {% else %}
+            <p class="detail-text text-muted">No release notes provided.</p>
+          {% endif %}
+
+          {% else %}
+
+          {# ── Rule change detail ── #}
+
           {# ── Author / Status / Date strip ── #}
           {% if row.author or row.rule_status or row.rule_date %}
           <div class="detail-meta">
@@ -236,6 +255,8 @@ function toggleFilterPanel() {
                 and not row.description and not row.detection_logic
                 and not row.spl and not row.refs %}
             <p class="detail-text text-muted">No additional details available.</p>
+          {% endif %}
+
           {% endif %}
 
         </td>

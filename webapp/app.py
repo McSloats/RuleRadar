@@ -255,6 +255,7 @@ _REPO_GATE_SKIP = {
     "admin_toggle_admin", "admin_reset_password", "admin_delete_user",
     "admin_activity",
     "admin_repos_add", "admin_repos_toggle", "admin_repos_remove",
+    "admin_scan_now",
     None,
 }
 
@@ -961,6 +962,20 @@ def admin_settings_timezone():
     return redirect(url_for("admin"))
 
 
+# ── Admin — on-demand scan ────────────────────────────────────────────────────
+
+@app.route("/admin/scan/now", methods=["POST"])
+@admin_required
+def admin_scan_now():
+    status = db.get_scan_status()
+    if status.get("is_scanning"):
+        flash("A scan is already in progress.", "error")
+    else:
+        _start_background_scan(triggered_by=f"{current_user.username} (manual)")
+        flash("Scan started. The nav badge will update as it runs.", "success")
+    return redirect(url_for("admin"))
+
+
 # ── Admin — repository management ──────────────────────────────────────────────
 
 @app.route("/admin/repos/add", methods=["POST"])
@@ -994,6 +1009,11 @@ def admin_repos_add():
             return redirect(url_for("admin"))
 
         paths = [p.strip().rstrip("/") + "/" for p in paths_raw.split(",") if p.strip()]
+        has_dotdot   = any(seg == ".." for p in paths for seg in p.replace("\\", "/").split("/"))
+        has_absolute = any(p.startswith(("/", "\\")) for p in paths)
+        if has_dotdot or has_absolute:
+            flash("Repository paths may not be absolute or contain '..'.", "error")
+            return redirect(url_for("admin"))
         if not paths:
             paths = [""]
 
