@@ -591,6 +591,96 @@
     .trunc       { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .gap-1       { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
     hr.divider   { border: none; border-top: 1px solid #2b1e4a; margin: 1.25rem 0; }
+
+    /* ── Mobile nav ── */
+    .nav-hamburger {
+      display: none;
+      flex-direction: column;
+      gap: 4px;
+      cursor: pointer;
+      background: none;
+      border: none;
+      padding: 0.4rem;
+      margin-left: auto;
+    }
+    .nav-hamburger span {
+      display: block;
+      width: 20px;
+      height: 2px;
+      background: #9080b8;
+      border-radius: 2px;
+      transition: background 0.15s;
+    }
+    .nav-hamburger:hover span { background: #ede8f5; }
+
+    .nav-mobile-drawer {
+      display: none;
+      position: fixed;
+      top: 52px;
+      left: 0;
+      right: 0;
+      background: #160f2a;
+      border-bottom: 1px solid #2b1e4a;
+      z-index: 99;
+      padding: 0.75rem 1rem 1rem;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+    .nav-mobile-drawer.open { display: flex; }
+    .nav-mobile-drawer .nav-link {
+      display: block;
+      padding: 0.6rem 0.75rem;
+      font-size: 0.95rem;
+    }
+    .nav-mobile-drawer .nav-logout {
+      display: block;
+      margin-top: 0.5rem;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.875rem;
+      text-align: center;
+    }
+    .nav-mobile-user {
+      font-size: 0.78rem;
+      color: #6a5888;
+      padding: 0.4rem 0.75rem 0.1rem;
+    }
+    .nav-mobile-divider { height: 1px; background: #2b1e4a; margin: 0.4rem 0; }
+
+    /* ── Responsive breakpoints ── */
+    @media (max-width: 700px) {
+      /* Show hamburger, hide desktop nav items */
+      .nav-hamburger { display: flex; }
+      nav > .nav-link,
+      nav > .nav-divider,
+      nav > .nav-spacer,
+      nav > #scan-badge,
+      nav > .nav-user,
+      nav > .nav-logout { display: none; }
+
+      /* Tighten main padding */
+      main { padding: 1rem 0.75rem; }
+
+      /* Filter search input: no enforced min-width */
+      .filter-form input[type="text"],
+      .filter-search-input { min-width: 0; width: 100%; }
+
+      /* Filter bar: stack vertically */
+      .filter-bar-main { flex-direction: column; align-items: stretch; }
+      .filter-bar-main > * { width: 100%; }
+      .filter-bar-main .btn { text-align: center; }
+
+      /* Page header: tighten */
+      .page-header { margin-bottom: 0.75rem; }
+
+      /* Tables: ensure horizontal scroll */
+      .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+      /* Reduce trunc max-width on small screens */
+      .trunc { max-width: 180px; }
+
+      /* Auth card: tighter padding */
+      .auth-card { padding: 1.25rem; }
+    }
   </style>
 </head>
 <body>
@@ -624,7 +714,37 @@
     {% if current_user.is_admin %}<span class="nav-admin-badge">admin</span>{% endif %}
   </span>
   <a class="nav-logout" href="{{ url_for('logout') }}">Log out</a>
+
+  <!-- Mobile hamburger -->
+  <button class="nav-hamburger" id="nav-hamburger" aria-label="Menu" aria-expanded="false"
+          onclick="toggleMobileNav()">
+    <span></span><span></span><span></span>
+  </button>
 </nav>
+
+<!-- Mobile drawer -->
+<div class="nav-mobile-drawer" id="nav-mobile-drawer">
+  <div class="nav-mobile-user">
+    {{ current_user.username }}
+    {% if current_user.is_admin %}<span class="nav-admin-badge">admin</span>{% endif %}
+  </div>
+  <div class="nav-mobile-divider"></div>
+  <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}"
+     href="{{ url_for('dashboard') }}">Dashboard</a>
+  <a class="nav-link {% if request.endpoint == 'detections' %}active{% endif %}"
+     href="{{ url_for('detections') }}">Detections</a>
+  <a class="nav-link {% if request.endpoint == 'updates' %}active{% endif %}"
+     href="{{ url_for('updates') }}">Updates</a>
+  <div class="nav-mobile-divider"></div>
+  <a class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}"
+     href="{{ url_for('settings') }}">Settings</a>
+  {% if current_user.is_admin %}
+  <a class="nav-link {% if request.endpoint == 'admin' %}active{% endif %}"
+     href="{{ url_for('admin') }}">Admin</a>
+  {% endif %}
+  <div class="nav-mobile-divider"></div>
+  <a class="nav-logout" href="{{ url_for('logout') }}">Log out</a>
+</div>
 {% endif %}
 
 <main>
@@ -668,6 +788,24 @@ async function refreshScanBadge() {
 
 refreshScanBadge();
 setInterval(refreshScanBadge, 15000);
+
+function toggleMobileNav() {
+  const drawer = document.getElementById('nav-mobile-drawer');
+  const btn    = document.getElementById('nav-hamburger');
+  const open   = drawer.classList.toggle('open');
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+// Close drawer when clicking outside
+document.addEventListener('click', function(e) {
+  const drawer = document.getElementById('nav-mobile-drawer');
+  const btn    = document.getElementById('nav-hamburger');
+  if (drawer && drawer.classList.contains('open') &&
+      !drawer.contains(e.target) && !btn.contains(e.target)) {
+    drawer.classList.remove('open');
+    btn.setAttribute('aria-expanded', 'false');
+  }
+});
 </script>
 {% endif %}
 

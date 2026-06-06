@@ -160,6 +160,14 @@
   grid-template-columns: repeat(3, 1fr);
   gap: 1rem;
 }
+@media (max-width: 900px) {
+  .dash-repo-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 600px) {
+  .dash-repo-grid { grid-template-columns: 1fr; }
+  .dash-stats-bar { flex-direction: column; }
+  .dash-stat-card { min-width: 0; }
+}
 .dash-repo-card {
   background: #160f2a;
   border: 1px solid #2b1e4a;
