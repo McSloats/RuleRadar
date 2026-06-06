@@ -1,13 +1,13 @@
 services:
 
-  # ── Web interface ──────────────────────────────────────────────────────────────
+  # ── Web interface + bi-hourly scheduler (single container) ────────────────
   web:
     image: tsloats/ruleradar:latest
     container_name: ruleradar-web
     ports:
       - "5000:5000"
     volumes:
-      # Persistent SQLite database and secret key shared between web and scheduler
+      # Persistent SQLite database, secret key, and cloned repos
       - ruleradar-db:/app/data
     environment:
       - RULERADAR_DB=/app/data/ruleradar.db
@@ -19,21 +19,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
-
-  # ── Bi-hourly scheduler (fires at 00:00, 02:00 … 22:00 UTC) ─────────────────
-  scheduler:
-    image: tsloats/ruleradar:latest
-    container_name: ruleradar-scheduler
-    command: ["python3", "core/scheduler.py"]
-    volumes:
-      - ruleradar-db:/app/data
-    environment:
-      - RULERADAR_DB=/app/data/ruleradar.db
-      - PYTHONUNBUFFERED=1
-    restart: unless-stopped
-    depends_on:
-      web:
-        condition: service_healthy
 
 volumes:
   ruleradar-db:

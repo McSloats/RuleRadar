@@ -25,15 +25,45 @@ python3 core/ruleradar.py    # run one scan cycle immediately
 
 ### Docker
 ```bash
+docker build -t tsloats/ruleradar:latest .   # build image (runs web + scheduler via start.py)
+docker push tsloats/ruleradar:latest         # push to Docker Hub
 docker compose pull             # pull latest image from Docker Hub (tsloats/ruleradar)
-docker compose up -d            # start web + scheduler (pulls image automatically if not present)
+docker compose up -d            # start single container (web + scheduler together)
 docker compose logs -f          # stream logs in real-time (PYTHONUNBUFFERED=1 is set)
 docker compose down             # stop
 docker compose down -v          # stop + delete all data volume
 ```
 
+### Process model (Docker)
+The Dockerfile `CMD` runs `start.py`, which launches both `webapp/app.py` and `core/scheduler.py` as sub-processes in a single container. There is no separate scheduler container — docker-compose has one service (`web`). `start.py` auto-restarts either process if it crashes.
+
 ### Database path
-Controlled by env var `RULERADAR_DB` (defaults to `./ruleradar.db`). In Docker it is `/app/data/ruleradar.db` on the named volume `ruleradar-db`, shared between both containers.
+Controlled by env var `RULERADAR_DB` (defaults to `./ruleradar.db`). In Docker it is `/app/data/ruleradar.db` — must be set via environment variable or the DB writes to `/app/ruleradar.db` inside the container (not persisted).
+
+## TrueNAS SCALE Deployment
+
+Deployed as a single custom app. Docker image: `tsloats/ruleradar:latest`.
+
+| Setting | Value |
+|---|---|
+| Image | `tsloats/ruleradar:latest` |
+| Host port → Container port | `5000:5000` |
+| Environment: `RULERADAR_DB` | `/app/data/ruleradar.db` |
+| Environment: `PYTHONUNBUFFERED` | `1` |
+| Mount type | Host Path |
+| Host path | `/mnt/Storage/RuleRadar` |
+| Mount path (container) | `/app/data` |
+| Restart policy | Unless Stopped |
+
+**Dataset permissions:** Owner and group must be set to `apps:apps` (UID/GID 568) with Read/Write/Execute. TrueNAS runs custom app containers under the `apps` user — if the dataset is owned by `root`, the container cannot write the database or clone repos.
+
+**No command override needed** — the Dockerfile default (`start.py`) runs both web and scheduler automatically.
+
+**Verify mount is working** after deploy:
+```bash
+sudo docker exec ix-ruleradar-ruleradar-1 ls -la /app/data/
+# Should show ruleradar.db, .secret_key, repos/
+```
 
 ## Architecture
 
