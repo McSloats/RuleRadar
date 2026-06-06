@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import threading
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -169,15 +170,28 @@ CREATE INDEX IF NOT EXISTS idx_urf_user_id ON user_rule_filters(user_id);
 
 # ── Connection ─────────────────────────────────────────────────────────────────
 
+# One persistent SQLite connection per thread.  Re-using connections eliminates
+# the file-descriptor churn that causes [Errno 24] Too many open files under
+# concurrent load (Flask threaded mode + 15-s badge poll + scheduler).
+_thread_local = threading.local()
+
+
 def get_conn() -> sqlite3.Connection:
-    # Ensure the parent directory exists — guards against RULERADAR_DB pointing
-    # at a path whose directory hasn't been created yet (e.g. a Docker volume
-    # path used in a local dev environment).
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    # Must be set per-connection for ON DELETE CASCADE to work
-    conn.execute("PRAGMA foreign_keys = ON")
+    """
+    Return the SQLite connection for the current thread, creating it on first
+    use.  Thread-local reuse keeps the open-fd count proportional to the number
+    of active threads rather than the number of DB calls.
+    """
+    conn: sqlite3.Connection | None = getattr(_thread_local, "conn", None)
+    if conn is None:
+        # Ensure the parent directory exists — guards against RULERADAR_DB
+        # pointing at a path whose directory hasn't been created yet.
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        # Must be set per-connection for ON DELETE CASCADE to work
+        conn.execute("PRAGMA foreign_keys = ON")
+        _thread_local.conn = conn
     return conn
 
 
