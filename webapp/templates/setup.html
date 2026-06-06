@@ -3,14 +3,12 @@
 
 {% block content %}
 <div class="auth-outer">
+  <img src="{{ url_for('static', filename='icon.svg') }}" class="auth-logo" alt="RuleRadar">
   <pre class="ascii-brand"> ____        _      ____            _
 |  _ \ _   _| | ___|  _ \  __ _  __| | __ _ _ __
 | |_) | | | | |/ _ \ |_) |/ _` |/ _` |/ _` | '__|
 |  _ &lt;| |_| | |  __/  _ &lt;| (_| | (_| | (_| | |
 |_| \_\\__,_|_|\___|_| \_\\__,_|\__,_|\__,_|_|</pre>
-  <div class="auth-icon-row">
-    <img src="{{ url_for('static', filename='icon.svg') }}" class="auth-icon" alt="">
-  </div>
   <div class="auth-card">
     <p class="subtitle">Create the first <strong>admin</strong> account to get started.<br>
        This page is permanently disabled once any user exists.</p>
