@@ -100,7 +100,7 @@
     When a scan detects new or modified rules, a summary is posted to your webhook.
     Each user can have their own channel.
   </p>
-  <form method="post" action="{{ url_for('settings_discord') }}" style="max-width:560px;">
+  <form id="discord-save-form" method="post" action="{{ url_for('settings_discord') }}" style="max-width:560px;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="form-group">
       <label>Webhook URL</label>
@@ -112,17 +112,20 @@
         Leave blank to disable notifications.
       </p>
     </div>
-    <div class="gap-1">
-      <button type="submit" class="btn btn-primary">Save Webhook</button>
-    </div>
   </form>
 
   {% if user_settings.discord_webhook %}
-  <form method="post" action="{{ url_for('settings_discord_test') }}" style="display:inline;">
+  <form id="discord-test-form" method="post" action="{{ url_for('settings_discord_test') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <button type="submit" class="btn btn-secondary">Send Test</button>
   </form>
   {% endif %}
+
+  <div style="display:flex; gap:0.75rem; align-items:center; margin-top:1rem;">
+    <button type="submit" form="discord-save-form" class="btn btn-primary">Save Webhook</button>
+    {% if user_settings.discord_webhook %}
+    <button type="submit" form="discord-test-form" class="btn btn-secondary">Send Test</button>
+    {% endif %}
+  </div>
 
   {% if user_settings.discord_webhook %}
   <p class="text-small text-success" style="margin-top:0.75rem;">
