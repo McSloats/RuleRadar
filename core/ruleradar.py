@@ -1147,7 +1147,7 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int]:
 # ── Discord notification ───────────────────────────────────────────────────────
 
 def send_discord(webhook_url: str, message: str):
-    """Send a plain-text Discord notification."""
+    """Send a plain-text Discord notification. Raises on any HTTP or network error."""
     payload = json.dumps({"content": message, "username": "RuleRadar"}).encode()
     req = urllib.request.Request(webhook_url, data=payload, method="POST")
     req.add_header("Content-Type", "application/json")
@@ -1155,8 +1155,9 @@ def send_discord(webhook_url: str, message: str):
         with urllib.request.urlopen(req, timeout=30) as r:
             print(f"  Discord: {r.status}", flush=True)
     except urllib.error.HTTPError as e:
-        print(f"  Discord error {e.code}: {e.read().decode(errors='replace')}",
-              file=sys.stderr)
+        body = e.read().decode(errors="replace")
+        print(f"  Discord error {e.code}: {body}", file=sys.stderr)
+        raise RuntimeError(f"Discord returned HTTP {e.code}: {body}") from e
 
 
 # ── Main scan entry point ──────────────────────────────────────────────────────
