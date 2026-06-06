@@ -666,28 +666,6 @@ def upsert_detection(
         return True
 
 
-def get_detections_missing_ttps(source: str) -> list[dict]:
-    """
-    Return id + file_path for every detection of the given source that has no
-    mitre_techniques.  Used by the TTP backfill routine.
-    """
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT id, file_path FROM detections "
-            "WHERE source = ? AND (mitre_techniques IS NULL OR mitre_techniques = '')",
-            (source,),
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def update_detection_ttps(detection_id: int, mitre_techniques: str, mitre_tactics: str):
-    """Overwrite only the MITRE TTP columns for one detection row."""
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE detections SET mitre_techniques = ?, mitre_tactics = ? WHERE id = ?",
-            (mitre_techniques, mitre_tactics, detection_id),
-        )
-
 
 def delete_detection(source: str, file_path: str):
     """Remove a detection that was deleted from the repository."""
@@ -998,16 +976,6 @@ def log_activity(
             (now_iso(), category, level, actor, action, detail),
         )
 
-
-def splunk_repos_have_missing_ttps() -> bool:
-    """Return True if any Splunk detection has an empty mitre_techniques field."""
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM detections d"
-            " JOIN repos r ON r.name = d.source"
-            " WHERE r.parser = 'splunk' AND d.mitre_techniques = '' LIMIT 1"
-        ).fetchone()
-    return row is not None
 
 
 def get_activity_log(

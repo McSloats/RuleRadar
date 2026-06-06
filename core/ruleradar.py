@@ -788,72 +788,6 @@ def _process_anvilogic(source: str, rel_path: str, text: str, rule_url: str) -> 
     return is_new, title
 
 
-# ── TTP backfill ──────────────────────────────────────────────────────────────
-
-def backfill_splunk_ttps() -> dict:
-    """
-    Re-parse YAML files for every Splunk detection that currently has an empty
-    mitre_techniques field and write the correct TTP data to the database.
-
-    This is needed after deploying the mitre_attack_tactics (plural) parser fix,
-    because existing rows were indexed before the fix and sync_repo only
-    re-processes files that changed in git — unchanged files never got updated.
-
-    Returns {"examined": N, "updated": N, "errors": N, "skipped_no_repo": N}.
-    """
-    all_repos     = db.get_all_repos()
-    splunk_repos  = [r for r in all_repos
-                     if r.get("parser") == "splunk" and r.get("local_path")]
-
-    examined = updated = errors = skipped = 0
-
-    for repo in splunk_repos:
-        local = Path(repo["local_path"])
-        if not local.exists():
-            print(
-                f"  [backfill] {repo['name']}: local clone not found at {local} — skip",
-                file=sys.stderr,
-            )
-            skipped += 1
-            continue
-
-        missing = db.get_detections_missing_ttps(repo["name"])
-        print(
-            f"  [backfill] {repo['name']}: {len(missing)} detections with empty TTPs",
-            flush=True,
-        )
-
-        for row in missing:
-            examined += 1
-            full = local / row["file_path"]
-            if not full.exists():
-                print(f"  [backfill]   missing file: {row['file_path']}", file=sys.stderr)
-                errors += 1
-                continue
-            try:
-                text       = full.read_text(encoding="utf-8", errors="replace")
-                meta       = parse_yaml(text)
-                techniques, tactics = extract_splunk_mitre(meta)
-                if techniques or tactics:
-                    db.update_detection_ttps(row["id"], techniques, tactics)
-                    updated += 1
-                # If still empty: file genuinely has no MITRE mapping; not an error
-            except Exception as e:
-                print(f"  [backfill]   error on {row['file_path']}: {e}", file=sys.stderr)
-                errors += 1
-
-    print(
-        f"  [backfill] done — examined={examined}, updated={updated}, "
-        f"errors={errors}, skipped_repos={skipped}",
-        flush=True,
-    )
-    return {
-        "examined":         examined,
-        "updated":          updated,
-        "errors":           errors,
-        "skipped_no_repo":  skipped,
-    }
-
 
 # ── Repository operations ──────────────────────────────────────────────────────
 
@@ -1328,19 +1262,6 @@ def run_scan(triggered_by: str = "scheduler") -> dict:
                     )
             except Exception as e:
                 print(f"  [{repo_cfg['name']}] Releases fetch error: {e}", file=sys.stderr)
-
-        # ── Opportunistic TTP backfill ─────────────────────────────────────────
-        # Re-parse Splunk rules with empty TTPs. The guard skips this entirely
-        # once all rows are populated, keeping subsequent scans fast.
-        if db.splunk_repos_have_missing_ttps():
-            bf = backfill_splunk_ttps()
-            if bf["updated"] > 0:
-                print(f"  TTP backfill: {bf['updated']} Splunk rules updated", flush=True)
-                db.log_activity(
-                    "scan", f"TTP backfill: {bf['updated']} Splunk rules updated",
-                    actor=triggered_by,
-                    detail=f"examined={bf['examined']}, errors={bf['errors']}",
-                )
 
         db.finish_scan(total_new, total_mod)
 
