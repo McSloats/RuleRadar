@@ -1001,7 +1001,7 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int]:
     git_run(["reset", "--hard", "FETCH_HEAD"], cwd=str(local))
 
     new_count, mod_count = 0, 0
-    recent_titles: list[str] = []
+    recent_titles: list[tuple[str, str]] = []  # (title, change_type)
 
     def _in_scope(fp: str) -> bool:
         """Return True if fp is an in-scope rule file inside a monitored path."""
@@ -1128,7 +1128,7 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int]:
 
             db.record_update(name, target_fp, title, change_type, logic, spl_val, rule_url)
             if len(recent_titles) < 5 and title:
-                recent_titles.append(title)
+                recent_titles.append((title, change_type))
 
     elif not diff_ok and last_sha:
         # diff failed (e.g. last_sha was garbage-collected from shallow history).
@@ -1291,8 +1291,9 @@ def run_scan(triggered_by: str = "scheduler") -> dict:
             for line in repo_summary:
                 repo_name = line.split(":")[0]
                 msg_parts.append(f"• {line}")
-                for title in repo_titles.get(repo_name, []):
-                    msg_parts.append(f"  ↳ {title}")
+                for title, change_type in repo_titles.get(repo_name, []):
+                    label = " (modified)" if change_type in ("modified", "renamed") else ""
+                    msg_parts.append(f"  ↳ {title}{label}")
             if site_url:
                 msg_parts.append(f"\n🔗 View updates: {site_url}/updates")
             msg = "\n".join(msg_parts)
