@@ -43,7 +43,7 @@
       <span class="repo-chip-status">{{ repo.status }}</span>
       {% if repo.last_synced_at %}
         <span class="repo-chip-time">
-          synced {{ repo.last_synced_at[:10] }}
+          synced {{ repo.last_synced_at | format_dt('%Y-%m-%d') }}
         </span>
       {% endif %}
     </div>

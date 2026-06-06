@@ -163,7 +163,7 @@ function toggleFilterPanel() {
         <td><span class="badge badge-{{ row.source }}">{{ row.source }}</span></td>
         <td><span class="badge badge-{{ row.change_type }}">{{ row.change_type }}</span></td>
         <td class="nowrap text-muted text-small">
-          {{ row.detected_at[:16].replace('T', ' ') if row.detected_at else '—' }}
+          {{ row.detected_at | format_dt }}
         </td>
         <td onclick="event.stopPropagation()">
           {% if row.rule_url %}

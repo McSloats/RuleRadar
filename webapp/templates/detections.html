@@ -196,7 +196,7 @@ function toggleFilterPanel() {
         <td><span class="badge badge-{{ row.source }}">{{ row.source }}</span></td>
         <td class="trunc text-muted">{{ row.description }}</td>
         <td class="nowrap text-muted text-small">
-          {{ row.last_updated[:16].replace('T', ' ') if row.last_updated else '—' }}
+          {{ row.last_updated | format_dt }}
         </td>
         <td onclick="event.stopPropagation()" style="white-space:nowrap;">
           {% if row.rule_url %}

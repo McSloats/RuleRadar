@@ -142,6 +142,14 @@ CREATE TABLE IF NOT EXISTS scan_status (
 
 INSERT OR IGNORE INTO scan_status (id) VALUES (1);
 
+-- ── Application-wide settings (admin-configurable key/value pairs) ──────────
+CREATE TABLE IF NOT EXISTS app_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
+
+INSERT OR IGNORE INTO app_settings (key, value) VALUES ('timezone', 'UTC');
+
 -- ── Per-user persistent rule filter ──────────────────────────────────────────
 -- Each row is one filter criterion. A detection/update passes if it matches
 -- ANY row for the user (rows are ORed). Within a row, all non-empty columns
@@ -207,6 +215,23 @@ def _migrate_schema(conn: sqlite3.Connection):
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def get_app_setting(key: str, default: str = "") -> str:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row else default
+
+
+def set_app_setting(key: str, value: str):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
 
 
 # ── User helpers ───────────────────────────────────────────────────────────────

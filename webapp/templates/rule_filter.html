@@ -62,7 +62,7 @@
           {% endif %}
         </td>
         <td class="text-muted text-small nowrap">
-          {{ f.created_at[:16].replace('T', ' ') if f.created_at else '—' }}
+          {{ f.created_at | format_dt }}
         </td>
         <td>
           <form method="post"

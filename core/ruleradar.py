@@ -32,6 +32,7 @@ import threading
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pathlib import Path
 
 # Ensure the project root is on sys.path so this module can be run directly
@@ -1189,7 +1190,13 @@ def run_scan(triggered_by: str = "scheduler") -> dict:
 
     try:
         db.set_scanning(True)
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        _tz_name  = db.get_app_setting("timezone", "UTC")
+        try:
+            _tz = ZoneInfo(_tz_name)
+        except (ZoneInfoNotFoundError, KeyError):
+            _tz = ZoneInfo("UTC")
+            _tz_name = "UTC"
+        timestamp = datetime.now(timezone.utc).astimezone(_tz).strftime("%Y-%m-%d %H:%M") + f" {_tz_name}"
         print(f"[{timestamp}] Scan started (triggered by: {triggered_by})", flush=True)
 
         if not YAML_AVAILABLE:

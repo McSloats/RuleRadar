@@ -58,7 +58,7 @@
                  {% elif row.level == 'warning' %}background:rgba(123,52,30,0.2);
                  {% endif %}">
         <td class="nowrap text-muted text-small">
-          {{ row.timestamp[:19].replace('T', ' ') if row.timestamp else '—' }}
+          {{ row.timestamp | format_dt('%Y-%m-%d %H:%M:%S') }}
         </td>
         <td>
           <span class="badge

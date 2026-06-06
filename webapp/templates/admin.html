@@ -218,7 +218,7 @@
             {% endif %}
           </td>
           <td class="text-muted text-small nowrap">
-            {{ user.created_at[:10] if user.created_at else '—' }}
+            {{ user.created_at | format_dt('%Y-%m-%d') }}
           </td>
           <td>
             <div class="gap-1">
@@ -302,6 +302,31 @@
       </label>
     </div>
     <button type="submit" class="btn btn-primary">Create User</button>
+  </form>
+</div>
+
+
+{# ═══ Application Settings ════════════════════════════════════════════════════ #}
+<div class="card">
+  <div class="card-title">⚙️ Application Settings</div>
+  <p class="text-muted text-small" style="margin-bottom:1rem;">
+    Global settings that apply to all users.
+  </p>
+
+  <form method="post" action="{{ url_for('admin_settings_timezone') }}" style="max-width:420px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-group">
+      <label for="timezone-select">Display Timezone</label>
+      <select id="timezone-select" name="timezone" class="wide">
+        {% for tz_id, tz_label in common_timezones %}
+        <option value="{{ tz_id }}" {% if tz_id == current_timezone %}selected{% endif %}>
+          {{ tz_label }}
+        </option>
+        {% endfor %}
+      </select>
+      <p class="hint">All dates and times across the application will be shown in this timezone.</p>
+    </div>
+    <button type="submit" class="btn btn-primary">Save Timezone</button>
   </form>
 </div>
 

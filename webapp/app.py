@@ -49,6 +49,7 @@ import urllib.request
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from functools import wraps
 from pathlib import Path
 
@@ -99,6 +100,72 @@ login_manager.login_message = "Please log in to access RuleRadar."
 login_manager.login_message_category = "error"
 
 db.init_db()
+
+
+# ── Timezone helpers ───────────────────────────────────────────────────────────
+
+# Curated list of common IANA timezones for the admin selector.
+COMMON_TIMEZONES: list[tuple[str, str]] = [
+    ("UTC",                    "UTC"),
+    ("America/New_York",       "US — Eastern (New York)"),
+    ("America/Chicago",        "US — Central (Chicago)"),
+    ("America/Denver",         "US — Mountain (Denver)"),
+    ("America/Phoenix",        "US — Mountain no DST (Phoenix)"),
+    ("America/Los_Angeles",    "US — Pacific (Los Angeles)"),
+    ("America/Anchorage",      "US — Alaska (Anchorage)"),
+    ("Pacific/Honolulu",       "US — Hawaii (Honolulu)"),
+    ("America/Toronto",        "Canada — Eastern (Toronto)"),
+    ("America/Vancouver",      "Canada — Pacific (Vancouver)"),
+    ("America/Sao_Paulo",      "Brazil — São Paulo"),
+    ("Europe/London",          "Europe — London (UK)"),
+    ("Europe/Dublin",          "Europe — Dublin (Ireland)"),
+    ("Europe/Paris",           "Europe — Paris / Berlin / Rome"),
+    ("Europe/Helsinki",        "Europe — Helsinki / Kyiv"),
+    ("Europe/Istanbul",        "Europe — Istanbul"),
+    ("Europe/Moscow",          "Europe — Moscow"),
+    ("Africa/Cairo",           "Africa — Cairo"),
+    ("Africa/Johannesburg",    "Africa — Johannesburg"),
+    ("Asia/Dubai",             "Asia — Dubai (UAE)"),
+    ("Asia/Kolkata",           "Asia — Kolkata (India)"),
+    ("Asia/Dhaka",             "Asia — Dhaka (Bangladesh)"),
+    ("Asia/Bangkok",           "Asia — Bangkok"),
+    ("Asia/Singapore",         "Asia — Singapore"),
+    ("Asia/Shanghai",          "Asia — Shanghai (China)"),
+    ("Asia/Tokyo",             "Asia — Tokyo (Japan)"),
+    ("Asia/Seoul",             "Asia — Seoul (Korea)"),
+    ("Australia/Perth",        "Australia — Perth"),
+    ("Australia/Brisbane",     "Australia — Brisbane (no DST)"),
+    ("Australia/Sydney",       "Australia — Sydney / Melbourne"),
+    ("Pacific/Auckland",       "Pacific — Auckland (New Zealand)"),
+]
+
+
+def _get_display_tz() -> ZoneInfo:
+    """Return the configured display timezone, falling back to UTC."""
+    tz_name = db.get_app_setting("timezone", "UTC")
+    try:
+        return ZoneInfo(tz_name)
+    except (ZoneInfoNotFoundError, KeyError):
+        return ZoneInfo("UTC")
+
+
+def _format_dt(iso_str: str, fmt: str = "%Y-%m-%d %H:%M") -> str:
+    """Convert a UTC ISO string to the configured display timezone."""
+    if not iso_str:
+        return "—"
+    try:
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        return dt.astimezone(_get_display_tz()).strftime(fmt)
+    except Exception:
+        return iso_str[:16].replace("T", " ")
+
+
+app.jinja_env.filters["format_dt"] = _format_dt
+
+
+@app.context_processor
+def inject_app_settings():
+    return {"app_tz_name": db.get_app_setting("timezone", "UTC")}
 
 
 # ── Login rate limiter (in-memory, per IP) ─────────────────────────────────────
@@ -688,13 +755,15 @@ def settings():
         saved_filters = []
 
     # Scan schedule
+    tz                = _get_display_tz()
+    tz_name           = db.get_app_setting("timezone", "UTC")
     status            = db.get_scan_status()
     last_scan         = status.get("last_scan")
     last_scan_display = (
-        last_scan[:19].replace("T", " ") + " UTC" if last_scan else "No scan yet"
+        _format_dt(last_scan, "%Y-%m-%d %H:%M") + f" {tz_name}" if last_scan else "No scan yet"
     )
-    next_scan_dt      = _next_scheduled_scan()
-    next_scan_display = next_scan_dt.strftime("%Y-%m-%d %H:%M UTC")
+    next_scan_dt      = _next_scheduled_scan().astimezone(tz)
+    next_scan_display = next_scan_dt.strftime("%Y-%m-%d %H:%M") + f" {tz_name}"
 
     # Active repos for the status card
     repos = db.get_all_repos()
@@ -763,7 +832,9 @@ def settings_discord_test():
         flash("No Discord webhook configured — save one first.", "error")
         return redirect(url_for("settings"))
     try:
-        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        _tz     = _get_display_tz()
+        _tzname = db.get_app_setting("timezone", "UTC")
+        ts      = datetime.now(timezone.utc).astimezone(_tz).strftime("%Y-%m-%d %H:%M") + f" {_tzname}"
         updates_url = request.host_url.rstrip("/") + url_for("updates")
         test_msg = "\n".join([
             f"**RuleRadar — {ts}**",
@@ -871,7 +942,23 @@ def admin():
         repos=repos,
         unconfigured=unconfigured,
         current_user_id=current_user.id,
+        current_timezone=db.get_app_setting("timezone", "UTC"),
+        common_timezones=COMMON_TIMEZONES,
     )
+
+
+@app.route("/admin/settings/timezone", methods=["POST"])
+@admin_required
+def admin_settings_timezone():
+    tz_name = request.form.get("timezone", "UTC").strip()
+    valid_names = {tz for tz, _ in COMMON_TIMEZONES}
+    if tz_name not in valid_names:
+        flash("Invalid timezone selection.", "error")
+        return redirect(url_for("admin"))
+    db.set_app_setting("timezone", tz_name)
+    db.log_activity("admin", f"Timezone set to {tz_name}", actor=current_user.username)
+    flash(f"Timezone updated to {tz_name}.", "success")
+    return redirect(url_for("admin"))
 
 
 # ── Admin — repository management ──────────────────────────────────────────────
