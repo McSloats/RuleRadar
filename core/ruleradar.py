@@ -956,7 +956,7 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int]:
     if not local.exists():
         print(f"  [{name}] Local clone missing — re-queuing for clone", flush=True)
         db.update_repo_status(name, "pending")
-        return 0, 0
+        return 0, 0, []
 
     print(f"  [{name}] Fetching updates…", flush=True)
     rc, out = git_run(["fetch", "--depth=1", "origin", branch], cwd=str(local))
@@ -964,7 +964,7 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int]:
         msg = f"Fetch failed: {out[:300]}"
         print(f"  [{name}] {msg}", file=sys.stderr)
         db.update_repo_status(name, "error", msg)
-        return 0, 0
+        return 0, 0, []
 
     # Check for new commits
     rc, new_sha = git_run(["rev-parse", "FETCH_HEAD"], cwd=str(local))
@@ -974,7 +974,7 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int]:
         print(f"  [{name}] No changes (SHA unchanged)", flush=True)
         # Update timestamp even if nothing changed
         db.update_repo_sha(name, new_sha or last_sha)
-        return 0, 0
+        return 0, 0, []
 
     # Compute the diff before updating the working tree
     diff_ok = False
@@ -1001,6 +1001,7 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int]:
     git_run(["reset", "--hard", "FETCH_HEAD"], cwd=str(local))
 
     new_count, mod_count = 0, 0
+    recent_titles: list[str] = []
 
     def _in_scope(fp: str) -> bool:
         """Return True if fp is an in-scope rule file inside a monitored path."""
@@ -1126,6 +1127,8 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int]:
                 spl_val = str(meta.get("search", ""))[:500]
 
             db.record_update(name, target_fp, title, change_type, logic, spl_val, rule_url)
+            if len(recent_titles) < 5 and title:
+                recent_titles.append(title)
 
     elif not diff_ok and last_sha:
         # diff failed (e.g. last_sha was garbage-collected from shallow history).
@@ -1136,12 +1139,12 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int]:
         )
         index_repo(repo_cfg)
         db.update_repo_sha(name, new_sha)
-        return 0, 0  # counts not meaningful for full re-index
+        return 0, 0, []  # counts not meaningful for full re-index
 
     db.update_repo_sha(name, new_sha)
     db.update_repo_status(name, "ready")
     print(f"  [{name}] Sync complete — {new_count} new / {mod_count} modified", flush=True)
-    return new_count, mod_count
+    return new_count, mod_count, recent_titles
 
 
 # ── Discord notification ───────────────────────────────────────────────────────
@@ -1210,6 +1213,7 @@ def run_scan(triggered_by: str = "scheduler") -> dict:
 
         total_new, total_mod = 0, 0
         repo_summary: list[str] = []
+        repo_titles: dict[str, list[str]] = {}  # repo name → up to 5 rule titles
 
         for repo_cfg in repos:
             name   = repo_cfg["name"]
@@ -1230,8 +1234,10 @@ def run_scan(triggered_by: str = "scheduler") -> dict:
                         repo_summary.append(f"{name}: clone FAILED")
 
                 elif status in ("ready", "error"):
-                    n, m = sync_repo(repo_cfg)
+                    n, m, titles = sync_repo(repo_cfg)
                     repo_summary.append(f"{name}: {n} new / {m} modified")
+                    if titles:
+                        repo_titles[name] = titles
                     total_new += n
                     total_mod += m
 
@@ -1280,9 +1286,15 @@ def run_scan(triggered_by: str = "scheduler") -> dict:
 
         # Discord notifications (only when there is something to report)
         if total_new + total_mod > 0:
+            site_url = os.environ.get("RULERADAR_SITE_URL", "").rstrip("/")
             msg_parts = [f"**RuleRadar — {timestamp}**"]
             for line in repo_summary:
+                repo_name = line.split(":")[0]
                 msg_parts.append(f"• {line}")
+                for title in repo_titles.get(repo_name, []):
+                    msg_parts.append(f"  ↳ {title}")
+            if site_url:
+                msg_parts.append(f"\n🔗 View updates: {site_url}/updates")
             msg = "\n".join(msg_parts)
             for webhook_url in db.get_all_user_webhooks():
                 send_discord(webhook_url, msg)

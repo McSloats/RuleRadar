@@ -764,13 +764,19 @@ def settings_discord_test():
         return redirect(url_for("settings"))
     try:
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        test_msg = (
-            f"**RuleRadar — {ts}**\n"
-            "• SigmaHQ/sigma: 2 new, 1 modified\n"
-            "• splunk/security_content: 1 new\n"
-            "\n"
-            f"✅ This is a test notification for **{current_user.username}** — your webhook is working!"
-        )
+        updates_url = request.host_url.rstrip("/") + url_for("updates")
+        test_msg = "\n".join([
+            f"**RuleRadar — {ts}**",
+            "• SigmaHQ/sigma: 2 new, 1 modified",
+            "  ↳ Detect PowerShell Download Cradle",
+            "  ↳ Suspicious LSASS Memory Access",
+            "  ↳ New: NTDS.dit Access via NTDSUtil",
+            "• splunk/security_content: 1 new",
+            "  ↳ Windows Credential Dumping via Registry",
+            "",
+            f"🔗 View updates: {updates_url}",
+            f"\n✅ This is a test notification for **{current_user.username}** — your webhook is working!",
+        ])
         ruleradar.send_discord(webhook, test_msg)
         db.log_activity("user", "Discord webhook test sent", actor=current_user.username)
         flash("Test notification sent to Discord.", "success")
