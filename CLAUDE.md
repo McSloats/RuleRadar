@@ -25,7 +25,8 @@ python3 core/ruleradar.py    # run one scan cycle immediately
 
 ### Docker
 ```bash
-docker compose up --build -d   # build and start both services
+docker compose pull             # pull latest image from Docker Hub (tsloats/ruleradar)
+docker compose up -d            # start web + scheduler (pulls image automatically if not present)
 docker compose logs -f          # stream logs in real-time (PYTHONUNBUFFERED=1 is set)
 docker compose down             # stop
 docker compose down -v          # stop + delete all data volume

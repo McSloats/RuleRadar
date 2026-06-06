@@ -2,7 +2,7 @@ services:
 
   # ── Web interface ──────────────────────────────────────────────────────────────
   web:
-    build: .
+    image: tsloats/ruleradar:latest
     container_name: ruleradar-web
     ports:
       - "5000:5000"
@@ -22,7 +22,7 @@ services:
 
   # ── Bi-hourly scheduler (fires at 00:00, 02:00 … 22:00 UTC) ─────────────────
   scheduler:
-    build: .
+    image: tsloats/ruleradar:latest
     container_name: ruleradar-scheduler
     command: ["python3", "core/scheduler.py"]
     volumes:

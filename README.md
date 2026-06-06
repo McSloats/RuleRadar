@@ -61,16 +61,41 @@ On the very first visit you are prompted to create an admin account. After loggi
 
 ## Running with Docker
 
+The pre-built image is published on Docker Hub at [`tsloats/ruleradar`](https://hub.docker.com/r/tsloats/ruleradar). No local build required.
+
+### Quick start
+
+**1. Pull the image**
 ```bash
-docker compose up --build -d
+docker pull tsloats/ruleradar:latest
+```
+
+**2. Download the Compose file**
+```bash
+curl -O https://raw.githubusercontent.com/McSloats/RuleRadar/main/docker-compose.yml
+```
+
+**3. Start both services**
+```bash
+docker compose up -d
 ```
 
 Open **http://localhost:5000** and create your admin account.  
-All settings (user accounts, Discord webhooks, repository data) are stored in a named Docker volume (`ruleradar-db`) and persist across restarts.
+All data (database, git clones, secret key) is stored in a named Docker volume (`ruleradar-db`) and persists across restarts.
+
+### Managing the container
 
 ```bash
+docker compose logs -f       # stream live logs from both services
 docker compose down          # stop
 docker compose down -v       # stop + wipe all data
+```
+
+### Updating to the latest version
+
+```bash
+docker compose pull          # fetch the new image from Docker Hub
+docker compose up -d         # recreate containers with the updated image
 ```
 
 ---
