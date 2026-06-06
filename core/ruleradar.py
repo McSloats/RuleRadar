@@ -1292,8 +1292,8 @@ def run_scan(triggered_by: str = "scheduler") -> dict:
                 repo_name = line.split(":")[0]
                 msg_parts.append(f"• {line}")
                 for title, change_type in repo_titles.get(repo_name, []):
-                    label = " (modified)" if change_type in ("modified", "renamed") else ""
-                    msg_parts.append(f"  ↳ {title}{label}")
+                    label = "modified" if change_type in ("modified", "renamed") else "new"
+                    msg_parts.append(f"  ↳ {title} ({label})")
             if site_url:
                 msg_parts.append(f"\n🔗 View updates: {site_url}/updates")
             msg = "\n".join(msg_parts)
