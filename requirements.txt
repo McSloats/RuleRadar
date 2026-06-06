@@ -11,5 +11,6 @@ bcrypt>=4.0,<5.0
 # Scheduler (replaces OS cron inside Docker / locally)
 APScheduler>=3.10,<4.0
 
-# Timezone data (needed by zoneinfo on Windows and slim Docker images)
+# Timezone support (zoneinfo is stdlib on 3.9+; backport for 3.8)
 tzdata>=2024.1
+backports.zoneinfo>=0.2.1; python_version < "3.9"

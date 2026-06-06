@@ -32,7 +32,10 @@ import threading
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+try:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+except ImportError:
+    from backports.zoneinfo import ZoneInfo, ZoneInfoNotFoundError  # type: ignore[no-redef]
 from pathlib import Path
 
 # Ensure the project root is on sys.path so this module can be run directly

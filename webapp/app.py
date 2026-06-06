@@ -49,7 +49,10 @@ import urllib.request
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+try:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+except ImportError:
+    from backports.zoneinfo import ZoneInfo, ZoneInfoNotFoundError  # type: ignore[no-redef]
 from functools import wraps
 from pathlib import Path
 
