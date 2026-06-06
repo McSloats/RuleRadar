@@ -985,7 +985,7 @@ def index_repo(repo_cfg: dict) -> int:
                 except Exception as e:
                     print(f"  [{name}] Parse error {rel}: {e}", file=sys.stderr)
 
-                if indexed % 500 == 0:
+                if indexed > 0 and indexed % 500 == 0:
                     print(f"  [{name}] … {indexed} files indexed", flush=True)
 
     db.update_repo_status(name, "ready")
@@ -1250,7 +1250,7 @@ def run_scan(triggered_by: str = "scheduler") -> dict:
 
     try:
         db.set_scanning(True)
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         print(f"[{timestamp}] Scan started (triggered by: {triggered_by})", flush=True)
 
         if not YAML_AVAILABLE:

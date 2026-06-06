@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-RuleRadar is a Flask + SQLite security detection rule monitor. It clones [SigmaHQ/sigma](https://github.com/SigmaHQ/sigma), [splunk/security_content](https://github.com/splunk/security_content), and [elastic/detection-rules](https://github.com/elastic/detection-rules) locally via git and tracks new, modified, deleted, and renamed detection rules through a dark-themed web interface.
+RuleRadar is a Flask + SQLite security detection rule monitor. It clones detection rule repositories — including [SigmaHQ/sigma](https://github.com/SigmaHQ/sigma), [splunk/security_content](https://github.com/splunk/security_content), [elastic/detection-rules](https://github.com/elastic/detection-rules), [panther-labs/panther-analysis](https://github.com/panther-labs/panther-analysis), [sublime-security/sublime-rules](https://github.com/sublime-security/sublime-rules), and [anvilogic-forge/armory](https://github.com/anvilogic-forge/armory) — locally via git and tracks new, modified, deleted, and renamed detection rules through a dark-themed web interface.
 
 ## Commands
 

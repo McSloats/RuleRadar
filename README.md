@@ -5,7 +5,7 @@
   <img src="webapp/static/title.svg" alt="RuleRadar">
 </p>
 
-Monitors detection rule repositories — [SigmaHQ/sigma](https://github.com/SigmaHQ/sigma), [splunk/security_content](https://github.com/splunk/security_content), and [elastic/detection-rules](https://github.com/elastic/detection-rules) — for new, modified, deleted, and renamed rules. All data is stored in a local SQLite database and browsable through a built-in web interface. No config files required — everything is configured through the web UI.
+Monitors detection rule repositories for new, modified, deleted, and renamed rules. Supports [SigmaHQ/sigma](https://github.com/SigmaHQ/sigma), [splunk/security_content](https://github.com/splunk/security_content), [elastic/detection-rules](https://github.com/elastic/detection-rules), [panther-labs/panther-analysis](https://github.com/panther-labs/panther-analysis), [sublime-security/sublime-rules](https://github.com/sublime-security/sublime-rules), and [anvilogic-forge/armory](https://github.com/anvilogic-forge/armory) out of the box — with support for adding custom repositories. All data is stored in a local SQLite database and browsable through a built-in web interface. No config files required — everything is configured through the web UI.
 
 <p align="center">
   <img src="docs/Dashboard.png" alt="RuleRadar — Dashboard" width="900">
@@ -15,12 +15,13 @@ Monitors detection rule repositories — [SigmaHQ/sigma](https://github.com/Sigm
 
 Every two hours RuleRadar:
 1. Fetches changes from all configured repos via `git fetch` and diffs against the last known commit
-2. Parses new and modified rule files — `.yml`/`.yaml` (Sigma, Splunk) and `.toml` (Elastic)
-3. Persists every detection and change event to SQLite
+2. Parses new and modified rule files (`.yml`/`.yaml` for most repos; `.toml` for Elastic)
+3. Extracts titles, descriptions, MITRE ATT&CK mappings, and detection logic per source format
+4. Persists every detection and change event to SQLite
 5. Sends a summary to every user who has a personal Discord webhook configured
 
 The web interface provides:
-- **Detections** — filter by title, description, severity, source, MITRE TTP, and time window; keyword search across detection logic, SPL, author, and references; saved filter presets
+- **Detections** — filter by title, description, source, MITRE TTP, and time window; keyword search across detection logic, author, and references; saved filter presets
 - **Updates** — chronological feed of new, modified, deleted, and renamed rules, filterable by source, change type, and time window
 - **Settings** — per-user Discord webhook, saved filter presets, password change
 - **Admin** — add/remove users, reset passwords, grant/revoke admin access, manage monitored repositories
@@ -104,7 +105,7 @@ docker compose up -d         # recreate containers with the updated image
 
 | Setting | Where | Description |
 |---------|-------|-------------|
-| Monitored repos | Admin → Monitored Repositories | Enable any combination of SigmaHQ/sigma, splunk/security_content, and elastic/detection-rules, or add your own custom repository. Repos are cloned locally via git — no API token required. |
+| Monitored repos | Admin → Monitored Repositories | Enable any of the six built-in repos (Sigma, Splunk, Elastic, Panther, Sublime, Anvilogic) or add your own custom repository. Repos are cloned locally via git — no API token required. |
 | Discord webhook | Settings → Discord Notifications | Per-user webhook for scan summaries. Create one in Discord: Server Settings → Integrations → Webhooks. |
 | Saved filters | Settings → Saved Filters | Named presets (source, change type, title, MITRE TTP, severity, time window) that appear as quick-access buttons on the Detections and Updates pages. |
 | Users | Admin → Users | Add users, reset passwords, grant/revoke admin, delete users. |
@@ -122,4 +123,4 @@ docker compose up -d         # recreate containers with the updated image
 
 ## First scan behaviour
 
-On first setup an admin selects repositories to monitor. RuleRadar performs a shallow `git clone --depth=1` of each repo and indexes all matching rule files (`.yml`/`.yaml` for Sigma and Splunk, `.toml` for Elastic). Subsequent scans use `git fetch` and only process files that changed since the last indexed commit.
+On first setup an admin selects repositories to monitor. RuleRadar performs a shallow `git clone --depth=1` of each repo and indexes all matching rule files (`.yml`/`.yaml` for most sources; `.toml` for Elastic). Subsequent scans use `git fetch` and only process files that changed since the last indexed commit.

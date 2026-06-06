@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS repos (
     repo           TEXT    NOT NULL DEFAULT '',
     branch         TEXT    NOT NULL DEFAULT '',
     paths          TEXT    NOT NULL DEFAULT '[]',   -- JSON array of sub-paths to scan
-    parser         TEXT    NOT NULL DEFAULT '',     -- 'sigma' | 'splunk'
+    parser         TEXT    NOT NULL DEFAULT '',     -- 'sigma' | 'splunk' | 'elastic' | 'panther' | 'sublime' | 'anvilogic'
     local_path     TEXT    NOT NULL DEFAULT '',     -- absolute path on disk
     last_sha       TEXT    NOT NULL DEFAULT '',     -- HEAD SHA of last indexed commit
     status         TEXT    NOT NULL DEFAULT 'pending',
