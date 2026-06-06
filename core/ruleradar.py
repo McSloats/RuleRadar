@@ -1151,6 +1151,7 @@ def send_discord(webhook_url: str, message: str):
     payload = json.dumps({"content": message, "username": "RuleRadar"}).encode()
     req = urllib.request.Request(webhook_url, data=payload, method="POST")
     req.add_header("Content-Type", "application/json")
+    req.add_header("User-Agent", "RuleRadar/1.0")
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             print(f"  Discord: {r.status}", flush=True)
