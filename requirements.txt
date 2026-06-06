@@ -1,16 +1,16 @@
 # Core monitor
-pyyaml>=6.0,<7.0
+pyyaml>=6.0
 tomli>=2.0,<3.0; python_version < "3.11"  # TOML parsing for Elastic rules (stdlib tomllib on 3.11+)
 
 # Web interface + auth
 flask>=3.0,<4.0
 flask-login>=0.6,<1.0
 flask-wtf>=1.2,<2.0
-bcrypt>=4.0,<5.0
+bcrypt>=4.0                                # no upper cap — 5.x required for Python 3.14+
 
 # Scheduler (replaces OS cron inside Docker / locally)
+# Pinned to 3.x — APScheduler 4.x has a completely different API
 APScheduler>=3.10,<4.0
 
-# Timezone support (zoneinfo is stdlib on 3.9+; backport for 3.8)
-tzdata>=2024.1
-backports.zoneinfo>=0.2.1; python_version < "3.9"
+# Timezone support (zoneinfo is stdlib since 3.9; tzdata provides IANA data on all platforms)
+tzdata>=2025.1

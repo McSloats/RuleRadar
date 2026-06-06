@@ -3,7 +3,7 @@
 # Default command starts the web interface; docker-compose overrides it
 # for the scheduler container.
 
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # Install curl (health-check) and git (repository scanning)
 RUN apt-get update && apt-get install -y --no-install-recommends curl git \

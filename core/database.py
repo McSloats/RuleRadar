@@ -170,6 +170,10 @@ CREATE INDEX IF NOT EXISTS idx_urf_user_id ON user_rule_filters(user_id);
 # ── Connection ─────────────────────────────────────────────────────────────────
 
 def get_conn() -> sqlite3.Connection:
+    # Ensure the parent directory exists — guards against RULERADAR_DB pointing
+    # at a path whose directory hasn't been created yet (e.g. a Docker volume
+    # path used in a local dev environment).
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     # Must be set per-connection for ON DELETE CASCADE to work
