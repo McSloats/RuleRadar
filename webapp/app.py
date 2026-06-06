@@ -763,11 +763,15 @@ def settings_discord_test():
         flash("No Discord webhook configured — save one first.", "error")
         return redirect(url_for("settings"))
     try:
-        ruleradar.send_discord(
-            webhook,
-            f"✅ **RuleRadar** — test notification for **{current_user.username}**. "
-            "Your webhook is working!"
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        test_msg = (
+            f"**RuleRadar — {ts}**\n"
+            "• SigmaHQ/sigma: 2 new, 1 modified\n"
+            "• splunk/security_content: 1 new\n"
+            "\n"
+            f"✅ This is a test notification for **{current_user.username}** — your webhook is working!"
         )
+        ruleradar.send_discord(webhook, test_msg)
         db.log_activity("user", "Discord webhook test sent", actor=current_user.username)
         flash("Test notification sent to Discord.", "success")
     except Exception as e:
