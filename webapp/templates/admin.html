@@ -2,6 +2,7 @@
 {% block title %}Admin — RuleRadar{% endblock %}
 
 {% block content %}
+<div class="admin-content-wrap">
 <div class="page-header">
   <h2>Administration</h2>
   <a href="{{ url_for('admin_activity') }}" class="btn btn-secondary" style="margin-left:auto;">
@@ -305,7 +306,10 @@
 </div>
 
 
+</div>{# /admin-content-wrap #}
+
 <style>
+.admin-content-wrap { max-width: 860px; margin: 0 auto; }
 /* ── Repo status badges ─────────────────────────────────────────────────── */
 .badge-repo-pending   { background: #2b1e4a; color: #c4b5fd; }
 .badge-repo-cloning   { background: #251840; color: #c4b5fd; }
