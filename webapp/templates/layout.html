@@ -499,12 +499,14 @@
     .empty-state p { font-size: 0.9rem; }
 
     /* ── Auth pages ── */
+    /* Reset main's padding so it doesn't offset the vertically-centred auth card */
+    main:has(.auth-outer) { padding: 0; }
     .auth-outer {
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      min-height: calc(100vh - 52px);
+      min-height: 100vh;
       padding: 2rem 1rem;
     }
     .ascii-brand {
