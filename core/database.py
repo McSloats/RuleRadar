@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS repos (
     last_sha       TEXT    NOT NULL DEFAULT '',     -- HEAD SHA of last indexed commit
     status         TEXT    NOT NULL DEFAULT 'pending',
     error_msg      TEXT    NOT NULL DEFAULT '',
+    fail_count     INTEGER NOT NULL DEFAULT 0,      -- consecutive sync failures; triggers auto re-clone
     enabled        INTEGER NOT NULL DEFAULT 1,
     added_at       TEXT    NOT NULL DEFAULT '',
     last_synced_at TEXT    NOT NULL DEFAULT ''
@@ -76,6 +77,7 @@ CREATE TABLE IF NOT EXISTS detections (
     rule_date        TEXT    NOT NULL DEFAULT '',
     refs             TEXT    NOT NULL DEFAULT '',
     rule_id          TEXT    NOT NULL DEFAULT '',
+    raw_content      TEXT    NOT NULL DEFAULT '',   -- full raw file text, for the expand-panel view and full-text search
     UNIQUE(source, file_path)
 );
 
@@ -96,6 +98,7 @@ CREATE TABLE IF NOT EXISTS updates (
     detection_logic TEXT    NOT NULL DEFAULT '',
     spl             TEXT    NOT NULL DEFAULT '',
     rule_url        TEXT    NOT NULL DEFAULT '',
+    diff_text       TEXT    NOT NULL DEFAULT '',   -- unified diff vs. the previously stored file (modified/renamed/deleted)
     detected_at     TEXT    NOT NULL
 );
 
@@ -222,6 +225,12 @@ def _migrate_schema(conn: sqlite3.Connection):
         "ALTER TABLE detections ADD COLUMN refs             TEXT NOT NULL DEFAULT ''",
         # v4: source rule UUID for precise filter matching
         "ALTER TABLE detections ADD COLUMN rule_id          TEXT NOT NULL DEFAULT ''",
+        # v5: consecutive sync-failure counter, drives auto re-clone recovery
+        "ALTER TABLE repos ADD COLUMN fail_count INTEGER NOT NULL DEFAULT 0",
+        # v6: full raw file text, for the expand-panel view and full-text search
+        "ALTER TABLE detections ADD COLUMN raw_content TEXT NOT NULL DEFAULT ''",
+        # v7: unified diff vs. the previously stored file, for modified/renamed/deleted updates
+        "ALTER TABLE updates ADD COLUMN diff_text TEXT NOT NULL DEFAULT ''",
     ]
     for sql in migrations:
         try:
@@ -613,11 +622,36 @@ def update_repo_status(name: str, status: str, error_msg: str = ""):
 
 
 def update_repo_sha(name: str, sha: str):
-    """Record the latest indexed commit SHA and update last_synced_at."""
+    """
+    Record the latest indexed commit SHA and update last_synced_at.
+    Also clears fail_count — reaching this point means the repo synced
+    successfully, so any prior consecutive-failure streak is over.
+    """
     with get_conn() as conn:
         conn.execute(
-            "UPDATE repos SET last_sha = ?, last_synced_at = ? WHERE name = ?",
+            "UPDATE repos SET last_sha = ?, last_synced_at = ?, fail_count = 0 WHERE name = ?",
             (sha, now_iso(), name),
+        )
+
+
+def increment_repo_fail_count(name: str) -> int:
+    """Increment a repo's consecutive-sync-failure counter and return the new value."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE repos SET fail_count = fail_count + 1 WHERE name = ?",
+            (name,),
+        )
+        row = conn.execute(
+            "SELECT fail_count FROM repos WHERE name = ?", (name,)
+        ).fetchone()
+        return row["fail_count"] if row else 1
+
+
+def reset_repo_fail_count(name: str):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE repos SET fail_count = 0 WHERE name = ?",
+            (name,),
         )
 
 
@@ -662,6 +696,7 @@ def upsert_detection(
     rule_date: str = "",
     refs: str = "",
     rule_id: str = "",
+    raw_content: str = "",
 ) -> bool:
     """
     Insert or update a detection row.
@@ -669,25 +704,52 @@ def upsert_detection(
 
     Extra metadata fields (MITRE, author, etc.) are keyword-only to make
     call sites explicit.
+
+    last_updated only advances when something about the row actually
+    changed. A full re-index (e.g. the shallow-history fallback in
+    sync_repo) re-processes every file in the repo whether or not it
+    changed -- without this check, that would stamp "now" onto every rule's
+    last_updated regardless of its real history, making the field useless
+    for tracking when a rule was actually discovered or modified.
     """
     ts = now_iso()
     with get_conn() as conn:
         existing = conn.execute(
-            "SELECT id FROM detections WHERE source = ? AND file_path = ?",
+            """SELECT title, description, detection_logic, spl, mitre_techniques,
+                      mitre_tactics, author, rule_status, rule_date, refs,
+                      rule_id, raw_content, last_updated
+               FROM detections WHERE source = ? AND file_path = ?""",
             (source, file_path),
         ).fetchone()
         if existing:
+            changed = (
+                existing["title"]            != title
+                or existing["description"]      != description
+                or existing["detection_logic"]  != detection_logic
+                or existing["spl"]              != spl
+                or existing["mitre_techniques"] != mitre_techniques
+                or existing["mitre_tactics"]    != mitre_tactics
+                or existing["author"]           != author
+                or existing["rule_status"]      != rule_status
+                or existing["rule_date"]        != rule_date
+                or existing["refs"]             != refs
+                or existing["rule_id"]          != rule_id
+                or existing["raw_content"]      != raw_content
+            )
+            new_last_updated = ts if changed else existing["last_updated"]
             conn.execute(
                 """UPDATE detections
                    SET title=?, description=?, detection_logic=?, spl=?,
                        rule_url=?, last_updated=?,
                        mitre_techniques=?, mitre_tactics=?,
-                       author=?, rule_status=?, rule_date=?, refs=?, rule_id=?
+                       author=?, rule_status=?, rule_date=?, refs=?, rule_id=?,
+                       raw_content=?
                    WHERE source=? AND file_path=?""",
                 (
-                    title, description, detection_logic, spl, rule_url, ts,
+                    title, description, detection_logic, spl, rule_url, new_last_updated,
                     mitre_techniques, mitre_tactics,
                     author, rule_status, rule_date, refs, rule_id,
+                    raw_content,
                     source, file_path,
                 ),
             )
@@ -697,13 +759,13 @@ def upsert_detection(
                (source, file_path, title, description, detection_logic, spl,
                 rule_url, first_seen, last_updated,
                 mitre_techniques, mitre_tactics,
-                author, rule_status, rule_date, refs, rule_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,  ?, ?,  ?, ?, ?, ?, ?)""",
+                author, rule_status, rule_date, refs, rule_id, raw_content)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,  ?, ?,  ?, ?, ?, ?, ?, ?)""",
             (
                 source, file_path, title, description, detection_logic, spl,
                 rule_url, ts, ts,
                 mitre_techniques, mitre_tactics,
-                author, rule_status, rule_date, refs, rule_id,
+                author, rule_status, rule_date, refs, rule_id, raw_content,
             ),
         )
         return True
@@ -774,7 +836,7 @@ def search_detections(
     - source           : 'sigma' | 'splunk' | 'elastic' | '' (all)
     - mitre            : searches mitre_techniques and mitre_tactics
     - days             : '7'|'30'|'90'|'' — limit to rules updated in the last N days
-    - details_q        : keyword across detection_logic, spl, author, rule_status, rule_date, refs
+    - details_q        : keyword across detection_logic, spl, author, rule_status, rule_date, refs, raw_content
     - user_filter_rows : if set, only return rules matching at least one filter row
     Returns (rows, total_count).
     """
@@ -804,10 +866,11 @@ def search_detections(
     if details_q:
         conditions.append(
             "(detection_logic LIKE ? OR spl LIKE ? OR author LIKE ?"
-            " OR rule_status LIKE ? OR rule_date LIKE ? OR refs LIKE ?)"
+            " OR rule_status LIKE ? OR rule_date LIKE ? OR refs LIKE ?"
+            " OR raw_content LIKE ?)"
         )
         like = f"%{details_q}%"
-        params += [like, like, like, like, like, like]
+        params += [like, like, like, like, like, like, like]
 
     # Per-user persistent rule filter (OR across rows, AND within each row)
     if user_filter_rows:
@@ -831,20 +894,48 @@ def search_detections(
     return [dict(r) for r in rows], total
 
 
+def get_detection(source: str, file_path: str) -> dict | None:
+    """Fetch a single detection's current stored state (e.g. its raw_content
+    before a sync overwrites it with the new version of the file)."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM detections WHERE source = ? AND file_path = ?",
+            (source, file_path),
+        ).fetchone()
+        return dict(row) if row else None
+
+
 # ── Update helpers ─────────────────────────────────────────────────────────────
 
 def record_update(
     source: str, file_path: str, title: str, change_type: str,
-    detection_logic: str, spl: str, rule_url: str,
+    rule_url: str, diff_text: str = "",
 ):
     with get_conn() as conn:
         conn.execute(
             """INSERT INTO updates
-               (source, file_path, title, change_type, detection_logic,
-                spl, rule_url, detected_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (source, file_path, title, change_type, detection_logic, spl, rule_url, now_iso()),
+               (source, file_path, title, change_type, rule_url, diff_text, detected_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (source, file_path, title, change_type, rule_url, diff_text, now_iso()),
         )
+
+
+def get_rule_updates(
+    source: str, file_path: str, change_type: str = "", limit: int = 5,
+) -> list[dict]:
+    """Return the most recent update events for one specific rule file,
+    newest first. Used by the History page's per-rule modification list."""
+    conds, params = ["source = ?", "file_path = ?"], [source, file_path]
+    if change_type:
+        conds.append("change_type = ?")
+        params.append(change_type)
+    where = "WHERE " + " AND ".join(conds)
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM updates {where} ORDER BY detected_at DESC LIMIT ?",
+            params + [limit],
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def get_updates(
@@ -867,7 +958,7 @@ def get_updates(
     - change_type : 'new' | 'modified' | 'deleted' | 'renamed' | 'release' | ''
     - title       : keyword search on title / release name
     - days        : '7'|'30'|'90'|'' — limit to events detected in the last N days
-    - details_q   : keyword across rule fields + release body
+    - details_q   : keyword across diff text, rule fields, raw file content, and release body
     """
     show_updates  = change_type != "release"
     show_releases = change_type in ("", "release")
@@ -899,12 +990,13 @@ def get_updates(
     if details_q:
         like = f"%{details_q}%"
         u_conds.append(
-            "(u.detection_logic LIKE ? OR u.spl LIKE ?"
+            "(u.diff_text LIKE ?"
             " OR COALESCE(d.author,      '') LIKE ?"
             " OR COALESCE(d.rule_status, '') LIKE ?"
             " OR COALESCE(d.rule_date,   '') LIKE ?"
             " OR COALESCE(d.description, '') LIKE ?"
-            " OR COALESCE(d.refs,        '') LIKE ?)"
+            " OR COALESCE(d.refs,        '') LIKE ?"
+            " OR COALESCE(d.raw_content, '') LIKE ?)"
         )
         u_params += [like, like, like, like, like, like, like]
 
@@ -934,12 +1026,14 @@ def get_updates(
 
     updates_sql = (
         f"SELECT u.id, u.source, u.file_path, u.title, u.change_type,"
-        f"       u.detection_logic, u.spl, u.rule_url, u.detected_at,"
-        f"       COALESCE(d.author,      '') AS author,"
-        f"       COALESCE(d.rule_status, '') AS rule_status,"
-        f"       COALESCE(d.rule_date,   '') AS rule_date,"
-        f"       COALESCE(d.description, '') AS description,"
-        f"       COALESCE(d.refs,        '') AS refs,"
+        f"       u.diff_text, u.rule_url, u.detected_at,"
+        f"       COALESCE(d.author,           '') AS author,"
+        f"       COALESCE(d.rule_status,      '') AS rule_status,"
+        f"       COALESCE(d.rule_date,        '') AS rule_date,"
+        f"       COALESCE(d.description,      '') AS description,"
+        f"       COALESCE(d.refs,             '') AS refs,"
+        f"       COALESCE(d.mitre_techniques, '') AS mitre_techniques,"
+        f"       COALESCE(d.raw_content,      '') AS raw_content,"
         f"       NULL AS tag_name, NULL AS body"
         f" FROM updates u {join} {u_where}"
     )
@@ -964,10 +1058,11 @@ def get_updates(
     releases_sql = (
         f"SELECT r.id, r.source, NULL AS file_path, r.name AS title,"
         f"       'release' AS change_type,"
-        f"       NULL AS detection_logic, NULL AS spl,"
+        f"       NULL AS diff_text,"
         f"       r.html_url AS rule_url, r.detected_at,"
         f"       '' AS author, '' AS rule_status, '' AS rule_date,"
         f"       '' AS description, '' AS refs,"
+        f"       '' AS mitre_techniques, '' AS raw_content,"
         f"       r.tag_name, r.body"
         f" FROM releases r {r_where}"
     )

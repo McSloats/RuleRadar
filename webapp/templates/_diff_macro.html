@@ -1,0 +1,27 @@
+{# Shared unified-diff renderer — used by the Updates page (modified/renamed/
+   deleted entries) and the History page (a rule's last 5 modifications).
+   added/removed are the pre-computed diff_stats() counts for diff_text. #}
+{% macro diff_block(diff_text, added, removed) %}
+{% if diff_text %}
+  <div class="diff-stats">
+    <span class="diff-added">+{{ added }}</span>
+    <span class="diff-removed">&minus;{{ removed }}</span>
+    <span class="text-muted">line{{ 's' if added + removed != 1 else '' }} changed</span>
+  </div>
+  <pre class="detail-diff">{% for line in diff_text.split('\n') -%}
+{%- if line.startswith('+++') or line.startswith('---') -%}
+<span class="diff-line line-file">{{ line }}</span>
+{%- elif line.startswith('@@') -%}
+<span class="diff-line line-hunk">{{ line }}</span>
+{%- elif line.startswith('+') -%}
+<span class="diff-line line-add">{{ line }}</span>
+{%- elif line.startswith('-') -%}
+<span class="diff-line line-remove">{{ line }}</span>
+{%- else -%}
+<span class="diff-line">{{ line }}</span>
+{%- endif -%}
+{%- endfor %}</pre>
+{% else %}
+  <p class="detail-text text-muted">No diff available for this change.</p>
+{% endif %}
+{% endmacro %}

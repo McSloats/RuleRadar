@@ -474,6 +474,29 @@
       line-height: 1.8;
     }
     .detail-refs li { word-break: break-all; }
+    /* Full raw file contents — collapsed by default, scrolls instead of growing unbounded */
+    pre.detail-raw { max-height: 420px; overflow-y: auto; margin-top: 0.4rem; }
+
+    /* Unified diff view (Updates page) */
+    .diff-stats {
+      display: flex; align-items: center; gap: 0.6rem;
+      margin-bottom: 0.5rem; font-size: 0.82rem;
+    }
+    .diff-stats .diff-added   { color: #6ee7b7; font-weight: 600; }
+    .diff-stats .diff-removed { color: #fca5a5; font-weight: 600; }
+    pre.detail-diff {
+      max-height: 480px; overflow-y: auto; margin-top: 0;
+      padding: 0; background: #06040c;
+    }
+    pre.detail-diff .diff-line { display: block; padding: 0 0.75rem; white-space: pre-wrap; word-break: break-word; }
+    pre.detail-diff .line-add    { background: rgba(110, 231, 183, 0.12); color: #a7f3d0; }
+    pre.detail-diff .line-remove { background: rgba(252, 165, 165, 0.12); color: #fecaca; }
+    pre.detail-diff .line-hunk   { color: #d4a017; }
+    pre.detail-diff .line-file   { color: #9080b8; }
+
+    /* History page — one block per past modification */
+    .history-entry { padding: 0.75rem 0; }
+    .history-entry-divider { border-bottom: 1px solid #180d30; margin-bottom: 0.75rem; }
 
     /* ── Pagination ── */
     .pagination {
@@ -698,6 +721,8 @@
      href="{{ url_for('detections') }}">Detections</a>
   <a class="nav-link {% if request.endpoint == 'updates' %}active{% endif %}"
      href="{{ url_for('updates') }}">Updates</a>
+  <a class="nav-link {% if request.endpoint == 'history' %}active{% endif %}"
+     href="{{ url_for('history') }}">History</a>
 
   <span class="nav-divider"></span>
 
@@ -736,6 +761,8 @@
      href="{{ url_for('detections') }}">Detections</a>
   <a class="nav-link {% if request.endpoint == 'updates' %}active{% endif %}"
      href="{{ url_for('updates') }}">Updates</a>
+  <a class="nav-link {% if request.endpoint == 'history' %}active{% endif %}"
+     href="{{ url_for('history') }}">History</a>
   <div class="nav-mobile-divider"></div>
   <a class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}"
      href="{{ url_for('settings') }}">Settings</a>

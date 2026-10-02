@@ -1,0 +1,110 @@
+{% extends "layout.html" %}
+{% from "_diff_macro.html" import diff_block %}
+{% block title %}History — RuleRadar{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+  <h2>History</h2>
+</div>
+
+{# ── Rule picker ── #}
+<form method="get" action="{{ url_for('history') }}" class="filter-bar">
+  <div class="filter-bar-main">
+    <input type="text" name="q" value="{{ q }}"
+           placeholder="Search by title to select a rule…" class="filter-search-input">
+    <button type="submit" class="btn btn-primary">Search</button>
+    {% if source or q %}
+      <a href="{{ url_for('history') }}" class="btn btn-secondary">Clear</a>
+    {% endif %}
+  </div>
+</form>
+
+{% if source and file_path %}
+
+  {# ── Selected rule: full file ── #}
+  <div class="card" style="margin-top:1.25rem;">
+    <div class="card-title">
+      {{ selected.title if selected else file_path.split('/')[-1] }}
+      <span class="badge badge-{{ source }}" style="margin-left:0.5rem;">{{ source }}</span>
+    </div>
+    <p class="text-muted text-small" style="margin-bottom:0.5rem;">{{ file_path }}</p>
+    {% if not selected %}
+      <p class="text-muted text-small" style="margin-bottom:0.75rem;">
+        This rule is no longer in the monitored repository — showing its modification history below.
+      </p>
+    {% elif selected.rule_url %}
+      <a href="{{ selected.rule_url }}" target="_blank" rel="noopener"
+         class="text-small" style="margin-bottom:0.5rem; display:inline-block;">GitHub ↗</a>
+    {% endif %}
+
+    <p class="detail-label" style="margin-top:0.5rem;">Full File</p>
+    {% if selected and selected.raw_content %}
+      <pre class="detail-raw" style="max-height:600px;">{{ selected.raw_content }}</pre>
+    {% else %}
+      <p class="detail-text text-muted">No file content available.</p>
+    {% endif %}
+  </div>
+
+  {# ── Last 5 modifications ── #}
+  <div class="card" style="margin-top:1.25rem;">
+    <div class="card-title">
+      Last {{ recent_mods | length }} Modification{{ 's' if recent_mods | length != 1 else '' }}
+    </div>
+    {% if recent_mods %}
+      {% for m in recent_mods %}
+        <div class="history-entry{% if not loop.last %} history-entry-divider{% endif %}">
+          <p class="detail-label" style="margin-top:0;">{{ m.detected_at | format_dt }}</p>
+          {{ diff_block(m.diff_text, m.diff_added, m.diff_removed) }}
+        </div>
+      {% endfor %}
+    {% else %}
+      <p class="detail-text text-muted">No modification history yet for this rule.</p>
+    {% endif %}
+  </div>
+
+{% elif q %}
+
+  {# ── Search results ── #}
+  <div class="card" style="margin-top:1.25rem;">
+    <div class="card-title">Results</div>
+    {% if results %}
+      <div class="table-wrap">
+        <table class="static-table">
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th style="width:90px;">Source</th>
+              <th>Path</th>
+              <th style="width:110px;">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in results %}
+            <tr>
+              <td>{{ r.title }}</td>
+              <td><span class="badge badge-{{ r.source }}">{{ r.source }}</span></td>
+              <td class="text-muted text-small">{{ r.file_path }}</td>
+              <td>
+                <a class="btn btn-sm btn-secondary"
+                   href="{{ url_for('history', source=r.source, file_path=r.file_path) }}">View</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="text-muted" style="margin-top:0.5rem;">No rules matched "{{ q }}".</p>
+    {% endif %}
+  </div>
+
+{% else %}
+
+  <div class="empty-state">
+    <p>Search for a rule above to view its full file and modification history.</p>
+  </div>
+
+{% endif %}
+
+{% endblock %}

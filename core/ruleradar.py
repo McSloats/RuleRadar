@@ -22,6 +22,7 @@ panel); no config.json is needed.
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import re
@@ -68,6 +69,13 @@ REPOS_DIR: Path = db.DB_PATH.parent / "repos"
 
 # Prevent concurrent scans across threads
 _scan_lock = threading.Lock()
+
+# A shallow (--depth=1) clone that is fetched indefinitely can get its local
+# .git/shallow boundary into a state where every subsequent fetch fails the
+# same way, even once the underlying remote-side condition is gone. After
+# this many consecutive sync failures, wipe the local clone and re-clone from
+# scratch instead of retrying against the same broken repo forever.
+MAX_CONSECUTIVE_FETCH_FAILURES = 3
 
 # Pre-defined repositories that can be enabled via the setup-repos page.
 # Admins can add custom repos via the admin panel.
@@ -138,47 +146,6 @@ AVAILABLE_REPOS: dict[str, dict] = {
         "parser":       "anvilogic",
     },
 }
-
-# ── MITRE ATT&CK tactic slug → display name ───────────────────────────────────
-MITRE_TACTICS: dict[str, str] = {
-    "initial_access":        "Initial Access",
-    "execution":             "Execution",
-    "persistence":           "Persistence",
-    "privilege_escalation":  "Privilege Escalation",
-    "defense_evasion":       "Defense Evasion",
-    "credential_access":     "Credential Access",
-    "discovery":             "Discovery",
-    "lateral_movement":      "Lateral Movement",
-    "collection":            "Collection",
-    "command_and_control":   "Command and Control",
-    "exfiltration":          "Exfiltration",
-    "impact":                "Impact",
-    "reconnaissance":        "Reconnaissance",
-    "resource_development":  "Resource Development",
-}
-
-# MITRE ATT&CK tactic ID (TA####) → display name
-# Used by the Panther parser which stores tactic IDs rather than slugs.
-MITRE_TACTIC_IDS: dict[str, str] = {
-    "TA0001": "Initial Access",
-    "TA0002": "Execution",
-    "TA0003": "Persistence",
-    "TA0004": "Privilege Escalation",
-    "TA0005": "Defense Evasion",
-    "TA0006": "Credential Access",
-    "TA0007": "Discovery",
-    "TA0008": "Lateral Movement",
-    "TA0009": "Collection",
-    "TA0010": "Exfiltration",
-    "TA0011": "Command and Control",
-    "TA0040": "Impact",
-    "TA0042": "Resource Development",
-    "TA0043": "Reconnaissance",
-}
-
-# Regex matching a MITRE technique ID: t1234 or t1234.567
-_TECHNIQUE_RE = re.compile(r"^t\d{4}(\.\d{3})?$")
-
 
 # ── GitHub REST API helpers (used only for releases metadata) ──────────────────
 
@@ -252,243 +219,83 @@ def clean_title_fallback(fname: str) -> str:
     return base.replace("_", " ").replace("-", " ").title()
 
 
-# ── MITRE extraction helpers ───────────────────────────────────────────────────
+# ── MITRE extraction ─────────────────────────────────────────────────────────
 
-def extract_sigma_mitre(meta: dict) -> tuple[str, str]:
+# Matches MITRE ATT&CK technique IDs (T1059, T1059.001), case-insensitive,
+# word-bounded so it won't match inside a longer token (e.g. "RT1059X").
+_MITRE_TECHNIQUE_RE = re.compile(
+    r"(?<![A-Za-z0-9_])[Tt](\d{4})(\.(\d{3}))?(?![A-Za-z0-9_])"
+)
+
+
+def extract_mitre_techniques(raw_text: str) -> str:
     """
-    Parse MITRE ATT&CK tags from a Sigma rule's 'tags' list.
+    Scan a rule file's raw text for MITRE ATT&CK technique IDs.
 
-    Sigma tags look like:
-        tags:
-          - attack.execution           ← tactic slug
-          - attack.t1059               ← technique
-          - attack.t1059.001           ← technique + sub-technique
+    Runs the same regex over every source — native or custom — instead of
+    relying on each format's own schema (Sigma tags, Splunk's
+    mitre_attack_id field, Elastic's threat array, etc.). Those bespoke
+    extractors only ever work on the exact schema they were written for;
+    a custom repo that stores technique IDs any other way (or a native repo
+    that mentions a technique outside its usual tag location) would come
+    back empty. Regex-matching the literal ID text wherever it appears
+    (tags, free-text description, inline comments) finds it regardless of
+    the surrounding schema.
 
-    Returns (pipe-joined techniques, pipe-joined tactic display names).
+    Matches both standalone techniques (T1059) and sub-techniques
+    (T1059.001), de-duplicated and order-preserving. Returns a pipe-joined
+    string of uppercase IDs, or "" if none were found.
     """
-    tags = meta.get("tags") or []
-    if not isinstance(tags, list):
-        tags = []
+    if not raw_text:
+        return ""
+    seen: set[str] = set()
+    out: list[str] = []
+    for m in _MITRE_TECHNIQUE_RE.finditer(raw_text):
+        tid = f"T{m.group(1)}" + (f".{m.group(3)}" if m.group(3) else "")
+        if tid not in seen:
+            seen.add(tid)
+            out.append(tid)
+    return "|".join(out)
 
-    techniques: list[str] = []
-    tactics: list[str]    = []
-    seen_t: set[str]      = set()
-    seen_ta: set[str]     = set()
 
-    for tag in tags:
-        tag = str(tag).lower()
-        if not tag.startswith("attack."):
+# ── File diffing (Updates page) ─────────────────────────────────────────────────
+
+def compute_file_diff(old_text: str, new_text: str, file_path: str) -> str:
+    """
+    Full unified diff between a file's previously stored content and its
+    current content, for the Updates page's modified/renamed/deleted entries.
+
+    old_text=="" renders as a pure addition (every line "+"); new_text==""
+    renders as a pure removal (every line "-") for deleted files.
+    """
+    # Normalize a missing trailing newline so the last changed line doesn't
+    # run together with the next diff line when both are joined below.
+    if old_text and not old_text.endswith("\n"):
+        old_text += "\n"
+    if new_text and not new_text.endswith("\n"):
+        new_text += "\n"
+
+    old_lines = old_text.splitlines(keepends=True)
+    new_lines = new_text.splitlines(keepends=True)
+    # Content lines already carry their own "\n" from keepends=True, and
+    # difflib's default lineterm="\n" appends one to the header/hunk lines
+    # too -- joining on "" (not "\n") avoids doubling every line break.
+    diff = difflib.unified_diff(old_lines, new_lines, fromfile=file_path, tofile=file_path)
+    return "".join(diff)
+
+
+def diff_stats(diff_text: str) -> tuple[int, int]:
+    """Return (lines_added, lines_removed) by counting +/- body lines in a
+    unified diff, excluding the --- / +++ file-header lines."""
+    added = removed = 0
+    for line in diff_text.splitlines():
+        if line.startswith("+++") or line.startswith("---"):
             continue
-        part = tag[7:]
-        if _TECHNIQUE_RE.match(part):
-            uid = part.upper()
-            if uid not in seen_t:
-                seen_t.add(uid)
-                techniques.append(uid)
-        else:
-            display = MITRE_TACTICS.get(part, "")
-            if display and display not in seen_ta:
-                seen_ta.add(display)
-                tactics.append(display)
-
-    return "|".join(techniques), "|".join(tactics)
-
-
-def extract_splunk_mitre(meta: dict) -> tuple[str, str]:
-    """
-    Parse MITRE ATT&CK data from a Splunk security_content detection.
-
-    Newer security_content files (post-2024 refactor) place mitre_attack_id and
-    mitre_attack_enrichments at the TOP LEVEL of the YAML document.  Older files
-    nested both fields inside a 'tags' dict.  Both formats are supported: the
-    top-level keys are checked first, with the tags dict as a fallback.
-
-    Technique IDs are a list of strings, e.g. ['T1059', 'T1059.001'].
-    A single rule can have multiple IDs; all are stored pipe-separated.
-
-    Returns (pipe-joined techniques, pipe-joined tactic names).
-    """
-    # Support both new (top-level) and old (under tags:) field locations
-    tags = meta.get("tags") or {}
-    if not isinstance(tags, dict):
-        tags = {}
-
-    # ── Technique IDs ─────────────────────────────────────────────────────────
-    raw_ids = meta.get("mitre_attack_id") or tags.get("mitre_attack_id") or []
-    if isinstance(raw_ids, str):
-        raw_ids = [raw_ids]
-    seen_t: set[str] = set()
-    techniques: list[str] = []
-    for t in raw_ids:
-        uid = str(t).strip().upper()
-        if uid and uid not in seen_t:
-            seen_t.add(uid)
-            techniques.append(uid)
-
-    # ── Tactics from enrichments ───────────────────────────────────────────────
-    # Newer security_content uses "mitre_attack_tactics" (plural);
-    # older files used "mitre_attack_tactic" (singular). Check both.
-    enrichments = (
-        meta.get("mitre_attack_enrichments")
-        or tags.get("mitre_attack_enrichments")
-        or []
-    )
-    seen_ta: set[str] = set()
-    tactics: list[str] = []
-    if isinstance(enrichments, list):
-        for enr in enrichments:
-            if not isinstance(enr, dict):
-                continue
-            tactic_list = (
-                enr.get("mitre_attack_tactics")
-                or enr.get("mitre_attack_tactic")
-                or []
-            )
-            if isinstance(tactic_list, str):
-                tactic_list = [tactic_list]
-            for t in tactic_list:
-                name = str(t).strip()
-                if name and name not in seen_ta:
-                    seen_ta.add(name)
-                    tactics.append(name)
-
-    return "|".join(techniques), "|".join(tactics)
-
-
-def extract_elastic_mitre(rule: dict) -> tuple[str, str]:
-    """
-    Parse MITRE ATT&CK data from an Elastic detection rule's 'threat' array.
-
-    Elastic TOML structure:
-        [[rule.threat]]
-        framework = "MITRE ATT&CK"
-        [rule.threat.tactic]
-        name = "Privilege Escalation"
-        [[rule.threat.technique]]
-        id = "T1055"
-        [[rule.threat.technique.subtechnique]]
-        id = "T1055.001"
-
-    Returns (pipe-joined technique IDs, pipe-joined tactic names).
-    """
-    threats = rule.get("threat") or []
-    if not isinstance(threats, list):
-        return "", ""
-
-    techniques: list[str] = []
-    tactics: list[str]    = []
-    seen_t: set[str]      = set()
-    seen_ta: set[str]     = set()
-
-    for threat in threats:
-        if not isinstance(threat, dict):
-            continue
-        tactic = threat.get("tactic") or {}
-        tactic_name = str(tactic.get("name", "")).strip()
-        if tactic_name and tactic_name not in seen_ta:
-            seen_ta.add(tactic_name)
-            tactics.append(tactic_name)
-        for tech in (threat.get("technique") or []):
-            if not isinstance(tech, dict):
-                continue
-            tid = str(tech.get("id", "")).strip().upper()
-            if tid and tid not in seen_t:
-                seen_t.add(tid)
-                techniques.append(tid)
-            for sub in (tech.get("subtechnique") or []):
-                if not isinstance(sub, dict):
-                    continue
-                sid = str(sub.get("id", "")).strip().upper()
-                if sid and sid not in seen_t:
-                    seen_t.add(sid)
-                    techniques.append(sid)
-
-    return "|".join(techniques), "|".join(tactics)
-
-
-def extract_panther_mitre(meta: dict) -> tuple[str, str]:
-    """
-    Parse MITRE ATT&CK data from a Panther rule's Reports section.
-
-    Reports.MITRE ATT&CK entries use the format "TA0005:T1562" where
-    TA#### is the tactic ID and T#### is the technique ID.
-
-    Returns (pipe-joined techniques, pipe-joined tactic names).
-    """
-    reports = meta.get("Reports") or {}
-    mitre_entries: list = []
-    if isinstance(reports, dict):
-        mitre_entries = reports.get("MITRE ATT&CK") or []
-    if not isinstance(mitre_entries, list):
-        mitre_entries = []
-
-    seen_t:  set[str] = set()
-    seen_ta: set[str] = set()
-    techniques: list[str] = []
-    tactics:    list[str] = []
-
-    for entry in mitre_entries:
-        # Expected format: "TA0005:T1562" or "TA0005:T1562.001"
-        parts = str(entry).split(":")
-        if len(parts) >= 2:
-            tactic_id    = parts[0].strip().upper()
-            technique_id = parts[1].strip().upper()
-            if technique_id and technique_id not in seen_t:
-                seen_t.add(technique_id)
-                techniques.append(technique_id)
-            tactic_name = MITRE_TACTIC_IDS.get(tactic_id, "")
-            if tactic_name and tactic_name not in seen_ta:
-                seen_ta.add(tactic_name)
-                tactics.append(tactic_name)
-
-    return "|".join(techniques), "|".join(tactics)
-
-
-def extract_anvilogic_mitre(meta: dict) -> tuple[str, str]:
-    """
-    Parse MITRE ATT&CK data from an Anvilogic Armory detection YAML.
-
-    technique_id: list of standard T-numbers, e.g. ["T1218", "T1204.002"]
-    techniques:   list of tactic:technique slugs, e.g.
-                  ["defense-evasion:system binary proxy execution",
-                   "execution:user execution:malicious file"]
-    Tactics are extracted from the segment before the first ":" in each
-    techniques entry, then looked up (or title-cased as a fallback).
-
-    Returns (pipe-joined techniques, pipe-joined tactic names).
-    """
-    raw_ids = meta.get("technique_id") or []
-    if isinstance(raw_ids, str):
-        raw_ids = [raw_ids]
-
-    seen_t: set[str] = set()
-    techniques: list[str] = []
-    for t in raw_ids:
-        uid = str(t).strip().upper()
-        if uid and uid not in seen_t:
-            seen_t.add(uid)
-            techniques.append(uid)
-
-    raw_tactics = meta.get("techniques") or []
-    if isinstance(raw_tactics, str):
-        raw_tactics = [raw_tactics]
-
-    seen_ta: set[str] = set()
-    tactics: list[str] = []
-    for entry in raw_tactics:
-        # First segment before ":" is the tactic slug (hyphenated, lower-case)
-        slug = str(entry).split(":")[0].strip().lower()
-        if not slug:
-            continue
-        # Look up in MITRE_TACTICS (uses underscores), fall back to title-case
-        tactic_name = MITRE_TACTICS.get(slug.replace("-", "_"), "")
-        if not tactic_name:
-            tactic_name = slug.replace("-", " ").title()
-        if tactic_name and tactic_name not in seen_ta:
-            seen_ta.add(tactic_name)
-            tactics.append(tactic_name)
-
-    return "|".join(techniques), "|".join(tactics)
+        if line.startswith("+"):
+            added += 1
+        elif line.startswith("-"):
+            removed += 1
+    return added, removed
 
 
 # ── Git helpers ────────────────────────────────────────────────────────────────
@@ -537,13 +344,14 @@ def _process_sigma(source: str, rel_path: str, text: str, rule_url: str) -> tupl
         "\n".join(str(r) for r in refs_raw)
         if isinstance(refs_raw, list) else str(refs_raw)
     )[:500]
-    techniques, tactics = extract_sigma_mitre(meta)
+    techniques = extract_mitre_techniques(text)
 
     is_new = db.upsert_detection(
         source, rel_path, title, description, logic, "", rule_url,
-        mitre_techniques=techniques, mitre_tactics=tactics,
+        mitre_techniques=techniques,
         author=author, rule_status=rule_status,
         rule_date=rule_date, refs=refs, rule_id=rule_id,
+        raw_content=text,
     )
     return is_new, title
 
@@ -573,13 +381,14 @@ def _process_splunk(source: str, rel_path: str, text: str, rule_url: str) -> tup
         "\n".join(str(r) for r in refs_raw)
         if isinstance(refs_raw, list) else str(refs_raw)
     )[:500]
-    techniques, tactics = extract_splunk_mitre(meta)
+    techniques = extract_mitre_techniques(text)
 
     is_new = db.upsert_detection(
         source, rel_path, title, description, "", search[:500], rule_url,
-        mitre_techniques=techniques, mitre_tactics=tactics,
+        mitre_techniques=techniques,
         author=author, rule_status=rule_status,
         rule_date=rule_date, refs=refs, rule_id=rule_id,
+        raw_content=text,
     )
     return is_new, title
 
@@ -594,14 +403,20 @@ def _process_elastic(source: str, rel_path: str, text: str, rule_url: str) -> tu
     """
     if not TOML_AVAILABLE:
         title  = clean_title_fallback(rel_path)
-        is_new = db.upsert_detection(source, rel_path, title, "", "", "", rule_url)
+        is_new = db.upsert_detection(
+            source, rel_path, title, "", "", "", rule_url,
+            mitre_techniques=extract_mitre_techniques(text), raw_content=text,
+        )
         return is_new, title
 
     try:
         data = tomllib.loads(text)
     except Exception:
         title  = clean_title_fallback(rel_path)
-        is_new = db.upsert_detection(source, rel_path, title, "", "", "", rule_url)
+        is_new = db.upsert_detection(
+            source, rel_path, title, "", "", "", rule_url,
+            mitre_techniques=extract_mitre_techniques(text), raw_content=text,
+        )
         return is_new, title
 
     rule = data.get("rule") or {}
@@ -637,13 +452,14 @@ def _process_elastic(source: str, rel_path: str, text: str, rule_url: str) -> tu
     language = str(rule.get("language", "")).upper()
     logic    = (f"[{language}]\n{query}" if language else query)[:600]
 
-    techniques, tactics = extract_elastic_mitre(rule)
+    techniques = extract_mitre_techniques(text)
 
     is_new = db.upsert_detection(
         source, rel_path, title, description, logic, "", rule_url,
-        mitre_techniques=techniques, mitre_tactics=tactics,
+        mitre_techniques=techniques,
         author=author, rule_status=rule_status,
         rule_date=rule_date, refs=refs, rule_id=rule_id,
+        raw_content=text,
     )
     return is_new, title
 
@@ -685,13 +501,14 @@ def _process_panther(source: str, rel_path: str, text: str, rule_url: str) -> tu
     else:
         refs = str(ref_raw)[:500]
 
-    techniques, tactics = extract_panther_mitre(meta)
+    techniques = extract_mitre_techniques(text)
 
     is_new = db.upsert_detection(
         source, rel_path, title, description, "", "", rule_url,
-        mitre_techniques=techniques, mitre_tactics=tactics,
+        mitre_techniques=techniques,
         author="", rule_status=rule_status,
         rule_date="", refs=refs, rule_id=rule_id,
+        raw_content=text,
     )
     return is_new, title
 
@@ -708,8 +525,10 @@ def _process_sublime(source: str, rel_path: str, text: str, rule_url: str) -> tu
       source               — MQL (Message Query Language) detection logic
       tactics_and_techniques — Sublime's own classification (not standard MITRE T-numbers)
 
-    Sublime rules are email-focused and use MQL; no MITRE technique IDs are
-    present.  tactics_and_techniques is stored as mitre_tactics for display.
+    Sublime rules are email-focused and use MQL; tactics_and_techniques is
+    Sublime's own taxonomy, not standard T-numbers, so it isn't used for
+    MITRE TTPs — extract_mitre_techniques() regex-scans the raw file instead,
+    same as every other source.
     """
     meta = parse_yaml(text)
 
@@ -721,17 +540,12 @@ def _process_sublime(source: str, rel_path: str, text: str, rule_url: str) -> tu
     # MQL detection logic stored in the 'source' field
     logic = str(meta.get("source", "")).strip()[:600]
 
-    # Sublime uses its own tactic/technique taxonomy — store as mitre_tactics
-    tac_raw = meta.get("tactics_and_techniques") or []
-    if isinstance(tac_raw, str):
-        tac_raw = [tac_raw]
-    tactics = "|".join(str(t).strip() for t in tac_raw if str(t).strip())
-
     is_new = db.upsert_detection(
         source, rel_path, title, description, logic, "", rule_url,
-        mitre_techniques="", mitre_tactics=tactics,
+        mitre_techniques=extract_mitre_techniques(text),
         author="", rule_status=rule_status,
         rule_date="", refs="", rule_id=rule_id,
+        raw_content=text,
     )
     return is_new, title
 
@@ -778,13 +592,14 @@ def _process_anvilogic(source: str, rel_path: str, text: str, rule_url: str) -> 
         detection_logic = (label + logic_raw)[:600]
         spl = ""
 
-    techniques, tactics = extract_anvilogic_mitre(meta)
+    techniques = extract_mitre_techniques(text)
 
     is_new = db.upsert_detection(
         source, rel_path, title, description, detection_logic, spl, rule_url,
-        mitre_techniques=techniques, mitre_tactics=tactics,
+        mitre_techniques=techniques,
         author="", rule_status="",
         rule_date="", refs=refs, rule_id=rule_id,
+        raw_content=text,
     )
     return is_new, title
 
@@ -964,7 +779,31 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int]:
     if rc != 0:
         msg = f"Fetch failed: {out[:300]}"
         print(f"  [{name}] {msg}", file=sys.stderr)
-        db.update_repo_status(name, "error", msg)
+        fail_count = db.increment_repo_fail_count(name)
+
+        if fail_count >= MAX_CONSECUTIVE_FETCH_FAILURES:
+            # Retrying against the same local clone hasn't worked — it's
+            # likely the shallow clone itself that's stuck, not the remote.
+            # Queue a fresh clone instead of failing the same way forever.
+            recover_msg = (
+                f"Auto-recovering after {fail_count} consecutive fetch "
+                f"failures (re-cloning from scratch): {msg}"
+            )
+            print(f"  [{name}] {recover_msg}", flush=True)
+            db.update_repo_status(name, "pending", recover_msg)
+            db.reset_repo_fail_count(name)
+            db.log_activity(
+                "scan", f"Auto-recovering {name} — re-cloning from scratch",
+                actor="system",
+                detail=f"{fail_count} consecutive fetch failures: {msg}",
+                level="warning",
+            )
+        else:
+            db.update_repo_status(name, "error", msg)
+            db.log_activity(
+                "scan", f"Fetch failed for {name} ({fail_count}/{MAX_CONSECUTIVE_FETCH_FAILURES})",
+                actor="system", detail=msg, level="warning",
+            )
         return 0, 0, []
 
     # Check for new commits
@@ -975,6 +814,7 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int]:
         print(f"  [{name}] No changes (SHA unchanged)", flush=True)
         # Update timestamp even if nothing changed
         db.update_repo_sha(name, new_sha or last_sha)
+        db.update_repo_status(name, "ready")
         return 0, 0, []
 
     # Compute the diff before updating the working tree
@@ -1017,12 +857,21 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int]:
 
             if status_char == "D":
                 if _in_scope(old_fp):
+                    old_row = db.get_detection(name, old_fp)
+                    old_content = old_row["raw_content"] if old_row else ""
                     db.delete_detection(name, old_fp)
                     db.record_update(
-                        name, old_fp, old_fp, "deleted", "", "",
+                        name, old_fp, old_fp, "deleted",
                         f"https://github.com/{owner}/{repo}/blob/{branch}/{old_fp}",
+                        diff_text=compute_file_diff(old_content, "", old_fp),
                     )
                 continue
+
+            # Capture the file's previously stored content before processing
+            # overwrites it -- this is the "old" side of the modified/renamed
+            # diff. For a rename, the old content lives under old_fp.
+            old_row     = db.get_detection(name, old_fp if status_char == "R" else new_fp)
+            old_content = old_row["raw_content"] if old_row else ""
 
             if status_char == "R":
                 # Handle rename: remove old, process new path
@@ -1089,45 +938,16 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int]:
                 change_type = "modified"
                 mod_count += 1
 
-            # Build appropriate logic/spl for the update record
-            if parser == "sigma":
-                logic   = sigma_detection_block(text)
-                spl_val = ""
-            elif parser == "elastic" and TOML_AVAILABLE:
-                try:
-                    _edata   = tomllib.loads(text)
-                    _erule   = _edata.get("rule") or {}
-                    _q       = str(_erule.get("query", "")).strip()
-                    _lang    = str(_erule.get("language", "")).upper()
-                    logic    = (f"[{_lang}]\n{_q}" if _lang else _q)[:600]
-                    spl_val  = ""
-                except Exception:
-                    logic   = ""
-                    spl_val = ""
-            elif parser == "sublime":
-                _meta   = parse_yaml(text)
-                logic   = str(_meta.get("source", "")).strip()[:600]
-                spl_val = ""
-            elif parser == "anvilogic":
-                _meta  = parse_yaml(text)
-                _lraw  = str(_meta.get("logic", "")).strip()
-                _lfmt  = str(_meta.get("logic_format", "")).strip()
-                if _lfmt.lower() == "splunk":
-                    logic   = ""
-                    spl_val = _lraw[:500]
-                else:
-                    _lbl    = f"[{_lfmt}]\n" if _lfmt else ""
-                    logic   = (_lbl + _lraw)[:600]
-                    spl_val = ""
-            elif parser == "panther":
-                logic   = ""
-                spl_val = ""
-            else:
-                meta    = parse_yaml(text)
-                logic   = ""
-                spl_val = str(meta.get("search", ""))[:500]
+            # Diff only matters for modified/renamed — "new" entries show the
+            # same Description/MITRE/References/full-file view as the
+            # Detections page instead (nothing to diff against).
+            diff_text = (
+                compute_file_diff(old_content, text, target_fp)
+                if change_type in ("modified", "renamed")
+                else ""
+            )
 
-            db.record_update(name, target_fp, title, change_type, logic, spl_val, rule_url)
+            db.record_update(name, target_fp, title, change_type, rule_url, diff_text=diff_text)
             if len(recent_titles) < 5 and title:
                 recent_titles.append((title, change_type))
 

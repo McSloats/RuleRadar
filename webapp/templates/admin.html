@@ -47,8 +47,8 @@
               · branch: <code style="font-size:0.78rem;">{{ repo.branch }}</code>
             </span>
             {% if repo.error_msg %}
-            <span class="text-danger text-small" style="display:block; margin-top:0.2rem;">
-              ⚠ {{ repo.error_msg[:120] }}
+            <span class="text-danger text-small" style="display:block; margin-top:0.2rem;" title="{{ repo.error_msg }}">
+              ⚠ {{ repo.error_msg[:160] }}{% if repo.fail_count %} ({{ repo.fail_count }}/{{ max_fetch_failures }} consecutive failures){% endif %}
             </span>
             {% endif %}
           </td>
@@ -144,31 +144,40 @@
       <form method="post" action="{{ url_for('admin_repos_add') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="form-group">
-          <label>Identifier <span class="text-muted">(unique short name, e.g. my_rules)</span></label>
-          <input type="text" name="name" class="wide" required placeholder="my_rules">
+          <label>GitHub URL</label>
+          <input type="text" name="github_url" class="wide" required
+                 placeholder="https://github.com/owner/repo">
+          <span class="text-muted text-small" style="display:block; margin-top:0.3rem;">
+            Owner, repo, branch, and path are parsed from the link. Paste a folder
+            link (<code style="background:#0a0716; padding:0.1rem 0.3rem; border-radius:3px; font-size:0.78rem; color:#c4b5fd;">.../tree/&lt;branch&gt;/rules</code>)
+            to fill in branch and path automatically — otherwise the branch is
+            auto-detected and path defaults to the whole repo.
+          </span>
         </div>
         <div class="form-row" style="margin-bottom:0.75rem;">
           <div style="flex:1; min-width:160px;">
-            <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">Display Name</label>
+            <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">
+              Identifier <span class="text-muted">(optional — derived from the repo name)</span>
+            </label>
+            <input type="text" name="name" class="wide" placeholder="my_rules">
+          </div>
+          <div style="flex:1; min-width:160px;">
+            <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">
+              Display Name <span class="text-muted">(optional)</span>
+            </label>
             <input type="text" name="display_name" class="wide" placeholder="My Custom Rules">
-          </div>
-          <div style="flex:1; min-width:120px;">
-            <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">GitHub Owner</label>
-            <input type="text" name="owner" class="wide" placeholder="owner" required>
-          </div>
-          <div style="flex:1; min-width:120px;">
-            <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">Repo Name</label>
-            <input type="text" name="repo" class="wide" placeholder="repo-name" required>
           </div>
         </div>
         <div class="form-row" style="margin-bottom:0.75rem;">
           <div style="flex:1; min-width:100px;">
-            <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">Branch</label>
-            <input type="text" name="branch" class="wide" placeholder="main" value="main">
+            <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">
+              Branch <span class="text-muted">(optional)</span>
+            </label>
+            <input type="text" name="branch" class="wide" placeholder="auto-detected">
           </div>
           <div style="flex:2; min-width:180px;">
             <label style="display:block; font-size:0.8rem; color:#9080b8; margin-bottom:0.3rem;">
-              Paths <span class="text-muted">(comma-separated, e.g. rules/, detections/)</span>
+              Paths <span class="text-muted">(comma-separated, optional if the URL has a folder)</span>
             </label>
             <input type="text" name="paths" class="wide" placeholder="rules/, detections/">
           </div>

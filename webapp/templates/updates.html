@@ -1,4 +1,5 @@
 {% extends "layout.html" %}
+{% from "_diff_macro.html" import diff_block %}
 {% block title %}Updates — RuleRadar{% endblock %}
 
 {% block content %}
@@ -18,43 +19,6 @@
     {{ f.name }}
   </a>
   {% endfor %}
-</div>
-{% endif %}
-
-{# ── All Rules / My Rules toggle ─────────────────────────────────────────── #}
-<form method="post" action="{{ url_for('toggle_filter_updates') }}" class="view-toggle">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-  <button type="submit" name="state" value="0"
-          class="toggle-btn {% if not filter_active %}toggle-btn-active{% endif %}">
-    All Rules
-  </button>
-  {% if rule_filter_count > 0 %}
-  <button type="submit" name="state" value="1"
-          class="toggle-btn {% if filter_active %}toggle-btn-active{% endif %}">
-    My Rules ({{ rule_filter_count }})
-  </button>
-  {% else %}
-  <button type="button" class="toggle-btn toggle-btn-disabled" disabled
-          title="No filter list uploaded yet — go to Settings to add rules">
-    My Rules
-  </button>
-  {% endif %}
-</form>
-
-{# ── "My Rules" active banner ─────────────────────────────────────────────── #}
-{% if filter_active and rule_filter_count > 0 %}
-<div class="rule-filter-bar">
-  Showing <strong>My Rules</strong>
-  ({{ rule_filter_count }} entr{{ 'ies' if rule_filter_count != 1 else 'y' }}).
-  <form method="post" action="{{ url_for('toggle_filter_updates') }}"
-        style="display:inline; margin:0;">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="state" value="0">
-    <button type="submit" class="rule-filter-switch-btn">Switch to All Rules</button>
-  </form>
-  to see everything.
-  <a href="{{ url_for('rule_filter_page') }}" class="rule-filter-bar-link"
-     style="margin-left:0.25rem;">Manage →</a>
 </div>
 {% endif %}
 
@@ -132,6 +96,43 @@ function toggleFilterPanel() {
 }
 </script>
 
+{# ── All Rules / My Rules toggle ─────────────────────────────────────────── #}
+<form method="post" action="{{ url_for('toggle_filter_updates') }}" class="view-toggle">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button type="submit" name="state" value="0"
+          class="toggle-btn {% if not filter_active %}toggle-btn-active{% endif %}">
+    All Rules
+  </button>
+  {% if rule_filter_count > 0 %}
+  <button type="submit" name="state" value="1"
+          class="toggle-btn {% if filter_active %}toggle-btn-active{% endif %}">
+    My Rules ({{ rule_filter_count }})
+  </button>
+  {% else %}
+  <button type="button" class="toggle-btn toggle-btn-disabled" disabled
+          title="No filter list uploaded yet — go to Settings to add rules">
+    My Rules
+  </button>
+  {% endif %}
+</form>
+
+{# ── "My Rules" active banner ─────────────────────────────────────────────── #}
+{% if filter_active and rule_filter_count > 0 %}
+<div class="rule-filter-bar">
+  Showing <strong>My Rules</strong>
+  ({{ rule_filter_count }} entr{{ 'ies' if rule_filter_count != 1 else 'y' }}).
+  <form method="post" action="{{ url_for('toggle_filter_updates') }}"
+        style="display:inline; margin:0;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="state" value="0">
+    <button type="submit" class="rule-filter-switch-btn">Switch to All Rules</button>
+  </form>
+  to see everything.
+  <a href="{{ url_for('rule_filter_page') }}" class="rule-filter-bar-link"
+     style="margin-left:0.25rem;">Manage →</a>
+</div>
+{% endif %}
+
 <p class="result-count">
   {{ total }} event{{ 's' if total != 1 else '' }}
   {% if title %} with title matching <strong>{{ title }}</strong>{% endif %}
@@ -192,69 +193,49 @@ function toggleFilterPanel() {
             <p class="detail-text text-muted">No release notes provided.</p>
           {% endif %}
 
+          {% elif row.change_type in ('modified', 'renamed', 'deleted') %}
+
+          {# ── Diff detail — the only thing shown for a changed file ── #}
+          {{ diff_block(row.diff_text, row.diff_added, row.diff_removed) }}
+
           {% else %}
 
-          {# ── Rule change detail ── #}
+          {# ── New rule — same format as the Detections page ── #}
 
-          {# ── Author / Status / Date strip ── #}
-          {% if row.author or row.rule_status or row.rule_date %}
-          <div class="detail-meta">
-            {% if row.author %}
-              <span><span class="detail-label">Author</span>{{ row.author }}</span>
-            {% endif %}
-            {% if row.rule_status %}
-              <span><span class="detail-label">Status</span>{{ row.rule_status }}</span>
-            {% endif %}
-            {% if row.rule_date %}
-              <span><span class="detail-label">Date</span>{{ row.rule_date }}</span>
-            {% endif %}
-          </div>
-          {% endif %}
+          <p class="detail-label">Description</p>
+          <p class="detail-text{{ '' if row.description else ' text-muted' }}">
+            {{ row.description or 'No description available.' }}
+          </p>
 
-          {# ── Description ── #}
-          {% if row.description %}
-            <p class="detail-text" style="margin-bottom:0.6rem; color:#9080b8;">{{ row.description }}</p>
-          {% endif %}
-
-          {# ── Detection logic ── #}
-          {% if row.source == 'splunk' %}
-            {# For Splunk content the SPL field IS the detection logic #}
-            {% if row.spl %}
-              <p class="detail-label">Detection Logic (SPL)</p>
-              <pre>{{ row.spl }}</pre>
-            {% endif %}
-          {% elif row.source == 'elastic' %}
-            {% if row.detection_logic %}
-              <p class="detail-label">Detection Logic (EQL / KQL)</p>
-              <pre>{{ row.detection_logic }}</pre>
-            {% endif %}
+          <p class="detail-label" style="margin-top:0.6rem;">MITRE TTPs</p>
+          {% if row.mitre_techniques %}
+            <div class="detail-mitre">
+              {% for tech in row.mitre_techniques.split('|') %}
+                <span class="badge badge-mitre">{{ tech }}</span>
+              {% endfor %}
+            </div>
           {% else %}
-            {# Sigma / other: native detection block #}
-            {% if row.detection_logic %}
-              <p class="detail-label">Detection Logic</p>
-              <pre>{{ row.detection_logic }}</pre>
-            {% endif %}
-            {% if row.spl %}
-              <p class="detail-label">Splunk SPL</p>
-              <pre>{{ row.spl }}</pre>
-            {% endif %}
+            <p class="detail-text text-muted">Could not identify</p>
           {% endif %}
 
-          {# ── References ── #}
+          <p class="detail-label" style="margin-top:0.6rem;">References</p>
           {% if row.refs %}
-            <p class="detail-label">References</p>
             <ul class="detail-refs">
               {% for ref in row.refs.split('\n') if ref.strip() %}
                 <li><a href="{{ ref.strip() }}" target="_blank" rel="noopener">{{ ref.strip() }}</a></li>
               {% endfor %}
             </ul>
+          {% else %}
+            <p class="detail-text text-muted">No references listed.</p>
           {% endif %}
 
-          {# ── Fallback when truly nothing is available ── #}
-          {% if not row.author and not row.rule_status and not row.rule_date
-                and not row.description and not row.detection_logic
-                and not row.spl and not row.refs %}
-            <p class="detail-text text-muted">No additional details available.</p>
+          {% if row.raw_content %}
+          <details class="inline-action" style="margin-top:0.6rem;">
+            <summary style="cursor:pointer; font-size:0.8rem; color:#d4a017;">
+              View full file contents
+            </summary>
+            <pre class="detail-raw">{{ row.raw_content }}</pre>
+          </details>
           {% endif %}
 
           {% endif %}

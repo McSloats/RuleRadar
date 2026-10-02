@@ -6,7 +6,12 @@ __pycache__/
 
 # Database & secrets (never commit these)
 *.db
+*.db-shm
+*.db-wal
 .secret_key
+
+# Cloned rule repositories (runtime data, recreated on first scan)
+repos/
 
 # Local config (obsolete — settings live in the web UI)
 config.json

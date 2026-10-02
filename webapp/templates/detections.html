@@ -92,16 +92,6 @@ function toggleFilterPanel() {
 }
 </script>
 
-<p class="result-count">
-  {{ total }} detection{{ 's' if total != 1 else '' }}
-  {% if title %} with title matching <strong>{{ title }}</strong>{% endif %}
-  {% if description %} description matching <strong>{{ description }}</strong>{% endif %}
-  {% if source %} in <strong>{{ source }}</strong>{% endif %}
-  {% if mitre %} MITRE <strong>{{ mitre }}</strong>{% endif %}
-  {% if days %} in the last <strong>{{ days }} days</strong>{% endif %}
-  {% if details_q %} details matching <strong>{{ details_q }}</strong>{% endif %}
-</p>
-
 {# ── All Rules / My Rules toggle ─────────────────────────────────────────── #}
 <form method="post" action="{{ url_for('toggle_filter_detections') }}" class="view-toggle">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -139,6 +129,16 @@ function toggleFilterPanel() {
 </div>
 {% endif %}
 
+<p class="result-count">
+  {{ total }} detection{{ 's' if total != 1 else '' }}
+  {% if title %} with title matching <strong>{{ title }}</strong>{% endif %}
+  {% if description %} description matching <strong>{{ description }}</strong>{% endif %}
+  {% if source %} in <strong>{{ source }}</strong>{% endif %}
+  {% if mitre %} MITRE <strong>{{ mitre }}</strong>{% endif %}
+  {% if days %} in the last <strong>{{ days }} days</strong>{% endif %}
+  {% if details_q %} details matching <strong>{{ details_q }}</strong>{% endif %}
+</p>
+
 {# ── Results table ────────────────────────────────────────────────────────── #}
 {% if rows %}
 
@@ -161,9 +161,7 @@ function toggleFilterPanel() {
         <th style="width:22px;"></th>
         <th>Title</th>
         <th style="width:175px;">MITRE TTPs</th>
-        <th style="width:75px;">Source</th>
-        <th>Description</th>
-        <th style="width:140px;">Last Updated</th>
+        <th style="width:140px;">Date</th>
         <th style="width:100px;">Actions</th>
       </tr>
     </thead>
@@ -193,8 +191,6 @@ function toggleFilterPanel() {
             <span class="text-muted text-small">—</span>
           {% endif %}
         </td>
-        <td><span class="badge badge-{{ row.source }}">{{ row.source }}</span></td>
-        <td class="trunc text-muted">{{ row.description }}</td>
         <td class="nowrap text-muted text-small">
           {{ row.last_updated | format_dt }}
         </td>
@@ -211,68 +207,37 @@ function toggleFilterPanel() {
         </td>
       </tr>
 
-      {# ── Expandable detail row ── #}
+      {# ── Expandable detail row ──────────────────────────────────────────────
+         Uniform format for every rule, native or custom:
+         Description → MITRE TTPs → References → full file contents → History.
+      #}
       <tr class="detail-row">
-        <td colspan="8">
+        <td colspan="6">
 
-          {# Meta row: author / status / date #}
-          {% if row.author or row.rule_status or row.rule_date %}
-          <div class="detail-meta">
-            {% if row.author %}
-              <span><span class="detail-label">Author</span> {{ row.author }}</span>
-            {% endif %}
-            {% if row.rule_status %}
-              <span><span class="detail-label">Status</span>
-                <span class="badge badge-{{ row.rule_status | lower }}">{{ row.rule_status }}</span>
-              </span>
-            {% endif %}
-            {% if row.rule_date %}
-              <span><span class="detail-label">Date</span> {{ row.rule_date }}</span>
-            {% endif %}
-          </div>
-          {% endif %}
+          {# Description #}
+          <p class="detail-label">Description</p>
+          <p class="detail-text{{ '' if row.description else ' text-muted' }}">
+            {{ row.description or 'No description available.' }}
+          </p>
 
-          {# MITRE full detail #}
-          {% if row.mitre_techniques or row.mitre_tactics %}
-          <div class="detail-mitre">
-            {% if row.mitre_techniques %}
-              <span class="detail-label">Techniques</span>
+          {# MITRE TTPs — regex-matched directly against the raw rule file,
+             the same way for every source (native or custom) rather than
+             relying on each format's own tagging schema. #}
+          <p class="detail-label" style="margin-top:0.6rem;">MITRE TTPs</p>
+          {% if row.mitre_techniques %}
+            <div class="detail-mitre">
               {% for tech in row.mitre_techniques.split('|') %}
                 <a href="{{ url_for('detections', title=title, description=description, source=source, days=days, details_q=details_q, mitre=tech) }}"
                    class="badge badge-mitre">{{ tech }}</a>
               {% endfor %}
-            {% endif %}
-            {% if row.mitre_tactics %}
-              <span class="detail-label" style="margin-left:0.75rem;">Tactics</span>
-              {% for tac in row.mitre_tactics.split('|') %}
-                <a href="{{ url_for('detections', title=title, description=description, source=source, days=days, details_q=details_q, mitre=tac) }}"
-                   class="badge badge-tactic">{{ tac }}</a>
-              {% endfor %}
-            {% endif %}
-          </div>
-          {% endif %}
-
-          {# Description #}
-          {% if row.description %}
-            <p class="detail-label" style="margin-top:0.6rem;">Description</p>
-            <p class="detail-text">{{ row.description }}</p>
-          {% endif %}
-
-          {# Detection Logic #}
-          {% if row.detection_logic %}
-            <p class="detail-label">Detection Logic</p>
-            <pre>{{ row.detection_logic }}</pre>
-          {% endif %}
-
-          {# Splunk SPL #}
-          {% if row.spl %}
-            <p class="detail-label">Splunk SPL</p>
-            <pre>{{ row.spl }}</pre>
+            </div>
+          {% else %}
+            <p class="detail-text text-muted">Could not identify</p>
           {% endif %}
 
           {# References #}
+          <p class="detail-label" style="margin-top:0.6rem;">References</p>
           {% if row.refs %}
-            <p class="detail-label">References</p>
             <ul class="detail-refs">
               {% for ref in row.refs.split('\n') %}
                 {% if ref.strip() %}
@@ -287,12 +252,26 @@ function toggleFilterPanel() {
                 {% endif %}
               {% endfor %}
             </ul>
+          {% else %}
+            <p class="detail-text text-muted">No references listed.</p>
           {% endif %}
 
-          {% if not row.description and not row.detection_logic and not row.spl
-                and not row.mitre_techniques and not row.refs %}
-            <p class="detail-text text-muted">No additional details available.</p>
+          {# Full file contents — collapsed by default; matches here are what
+             the "Search within details" filter is searching against. #}
+          {% if row.raw_content %}
+          <details class="inline-action" style="margin-top:0.6rem;">
+            <summary style="cursor:pointer; font-size:0.8rem; color:#d4a017;">
+              View full file contents
+            </summary>
+            <pre class="detail-raw">{{ row.raw_content }}</pre>
+          </details>
           {% endif %}
+
+          {# History #}
+          <p class="detail-label" style="margin-top:0.6rem;">History</p>
+          <p class="detail-text">
+            <a href="{{ url_for('history', source=row.source, file_path=row.file_path) }}">View full history →</a>
+          </p>
 
         </td>
       </tr>

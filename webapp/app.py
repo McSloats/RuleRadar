@@ -38,6 +38,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 import secrets
 import shutil
 import sys
@@ -202,6 +203,64 @@ def _is_valid_discord_webhook(url: str) -> bool:
         )
     except Exception:
         return False
+
+
+# ── Custom repo URL parsing ─────────────────────────────────────────────────────
+
+def parse_github_url(raw: str) -> dict | None:
+    """
+    Parse a GitHub repo URL into its parts, so admins can paste a link instead
+    of filling in owner/repo/branch/path separately. Accepts:
+      - "https://github.com/owner/repo" (or with a trailing ".git" / "/")
+      - ".../tree/<branch>/<path...>"  — a folder link, branch + path captured
+      - ".../blob/<branch>/<path...>"  — a file link, path trimmed to its parent dir
+      - bare "owner/repo" shorthand (no scheme, no host)
+    Returns {"owner", "repo", "branch", "path"} (branch/path are None when
+    absent from the URL) or None if the input doesn't parse as a GitHub repo.
+    """
+    raw = raw.strip()
+    if not raw:
+        return None
+
+    if "github.com" not in raw and "://" not in raw:
+        parts = [p for p in raw.strip("/").split("/") if p]
+        if len(parts) != 2:
+            return None
+        owner, repo = parts
+        return {"owner": owner, "repo": repo.removesuffix(".git"), "branch": None, "path": None}
+
+    if not raw.startswith(("http://", "https://")):
+        raw = "https://" + raw
+
+    parsed = urllib.parse.urlsplit(raw)
+    if not parsed.netloc.endswith("github.com"):
+        return None
+
+    segments = [s for s in parsed.path.split("/") if s]
+    if len(segments) < 2:
+        return None
+
+    owner, repo = segments[0], segments[1].removesuffix(".git")
+    branch = path = None
+    if len(segments) > 3 and segments[2] in ("tree", "blob"):
+        branch = segments[3]
+        if len(segments) > 4:
+            path_segments = segments[4:]
+            if segments[2] == "blob":
+                path_segments = path_segments[:-1]  # drop the filename
+            path = "/".join(path_segments) or None
+
+    return {"owner": owner, "repo": repo, "branch": branch, "path": path}
+
+
+def detect_default_branch(owner: str, repo: str) -> str | None:
+    """Ask the remote for its default branch without cloning (ls-remote only)."""
+    url = f"https://github.com/{owner}/{repo}.git"
+    rc, out = ruleradar.git_run(["ls-remote", "--symref", url, "HEAD"], timeout=15)
+    if rc != 0:
+        return None
+    m = re.search(r"^ref:\s+refs/heads/(\S+)\s+HEAD", out, re.MULTILINE)
+    return m.group(1) if m else None
 
 
 # ── CSRF error handler ─────────────────────────────────────────────────────────
@@ -601,6 +660,12 @@ def updates():
     )
     total_pages = max(1, (total + per_page - 1) // per_page)
 
+    # Line-change counts for the diff view (modified/renamed/deleted only)
+    for row in rows:
+        if row.get("diff_text"):
+            added, removed = ruleradar.diff_stats(row["diff_text"])
+            row["diff_added"], row["diff_removed"] = added, removed
+
     return render_template(
         "updates.html",
         rows=rows, total=total,
@@ -610,6 +675,38 @@ def updates():
         saved_filters=_get_saved_filters(),
         rule_filter_count=len(rule_filter_rows),
         filter_active=filter_active,
+    )
+
+
+@app.route("/history")
+@login_required
+def history():
+    """
+    Pick a rule and see its full current file plus its last 5 modifications
+    (date + diff each), reusing the diff machinery from the Updates page.
+    """
+    source    = request.args.get("source",    "").strip()
+    file_path = request.args.get("file_path", "").strip()
+    q         = request.args.get("q",         "").strip()
+
+    selected    = None
+    recent_mods = []
+    if source and file_path:
+        selected = db.get_detection(source, file_path)
+        recent_mods = db.get_rule_updates(source, file_path, change_type="modified", limit=5)
+        for m in recent_mods:
+            if m.get("diff_text"):
+                added, removed = ruleradar.diff_stats(m["diff_text"])
+                m["diff_added"], m["diff_removed"] = added, removed
+
+    results = []
+    if q and not (source and file_path):
+        results, _ = db.search_detections(title=q, per_page=25)
+
+    return render_template(
+        "history.html",
+        source=source, file_path=file_path, q=q,
+        selected=selected, recent_mods=recent_mods, results=results,
     )
 
 
@@ -945,6 +1042,7 @@ def admin():
         current_user_id=current_user.id,
         current_timezone=db.get_app_setting("timezone", "UTC"),
         common_timezones=COMMON_TIMEZONES,
+        max_fetch_failures=ruleradar.MAX_CONSECUTIVE_FETCH_FAILURES,
     )
 
 
@@ -984,29 +1082,55 @@ def admin_repos_add():
     """
     Add a repository to monitor.  Accepts either:
       - a name from AVAILABLE_REPOS (pre-filled config), or
-      - a fully custom repo (owner/repo/branch/paths/parser fields).
+      - a custom repo, specified as a GitHub URL (owner/repo/branch/path are
+        parsed from it — see parse_github_url) plus paths/parser.
     """
-    name = request.form.get("name", "").strip().lower().replace(" ", "_")
-    if not name:
-        flash("Repository identifier is required.", "error")
-        return redirect(url_for("admin"))
+    # Collapse anything other than a-z/0-9/-/_ to a single underscore. The
+    # sanitized name is used as both a URL path segment (/admin/repos/<name>/…)
+    # and a filesystem directory name (REPOS_DIR/<name>) — an unsanitized
+    # "/" (e.g. from pasting a display name like "Anvilogic / Armory") breaks
+    # the toggle/remove routes with a 404 and splits the clone across nested
+    # directories.
+    name = request.form.get("name", "").strip().lower()
+    name = re.sub(r"[^a-z0-9_-]+", "_", name).strip("_")
 
     # Check for pre-defined config
-    pre = ruleradar.AVAILABLE_REPOS.get(name)
+    pre = ruleradar.AVAILABLE_REPOS.get(name) if name else None
     if pre:
         cfg = pre
     else:
-        # Custom repo
-        display_name = request.form.get("display_name", name)
-        owner        = request.form.get("owner", "").strip()
-        repo         = request.form.get("repo", "").strip()
-        branch       = request.form.get("branch", "main").strip()
-        paths_raw    = request.form.get("paths", "").strip()
-        parser       = request.form.get("parser", "sigma")
-
-        if not owner or not repo:
-            flash("Owner and repo are required for custom repositories.", "error")
+        # Custom repo — owner/repo/branch/path come from a pasted GitHub URL
+        # rather than separate fields.
+        github_url = request.form.get("github_url", "").strip()
+        parsed = parse_github_url(github_url)
+        if not parsed:
+            flash(
+                "Enter a valid GitHub repository URL, e.g. "
+                "https://github.com/owner/repo",
+                "error",
+            )
             return redirect(url_for("admin"))
+
+        owner = parsed["owner"]
+        repo  = parsed["repo"]
+
+        if not name:
+            name = re.sub(r"[^a-z0-9_-]+", "_", repo.lower()).strip("_")
+        if not name:
+            flash("Could not derive a repository identifier from that URL — set one manually.", "error")
+            return redirect(url_for("admin"))
+
+        # Branch precedence: explicit field > parsed from a /tree/<branch>/
+        # URL > the remote's actual default branch > "main" as a last resort.
+        branch = (
+            request.form.get("branch", "").strip()
+            or parsed["branch"]
+            or detect_default_branch(owner, repo)
+            or "main"
+        )
+        display_name = request.form.get("display_name", "").strip() or f"{owner} / {repo}"
+        paths_raw     = request.form.get("paths", "").strip() or (parsed["path"] or "")
+        parser        = request.form.get("parser", "sigma")
 
         paths = [p.strip().rstrip("/") + "/" for p in paths_raw.split(",") if p.strip()]
         has_dotdot   = any(seg == ".." for p in paths for seg in p.replace("\\", "/").split("/"))
