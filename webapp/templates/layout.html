@@ -6,6 +6,15 @@
   <title>{% block title %}RuleRadar{% endblock %}</title>
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
   <meta name="csrf-token" content="{{ csrf_token() }}">
+  <script>
+    // Applied before <body> paints so the sidebar never flashes expanded
+    // then immediately collapses on load.
+    try {
+      if (localStorage.getItem('navCollapsed') === '1') {
+        document.documentElement.classList.add('nav-collapsed');
+      }
+    } catch (_) {}
+  </script>
   <style>
     /*
      * RuleRadar — dark purple + dark yellow theme
@@ -30,18 +39,30 @@
       min-height: 100vh;
     }
 
-    /* ── Navbar ── */
+    /* ── Navbar — left side panel on desktop, top bar + drawer on mobile ── */
+    :root { --nav-width: 200px; --nav-width-collapsed: 64px; }
     nav {
       background: #160f2a;
-      border-bottom: 1px solid #2b1e4a;
-      padding: 0 1.5rem;
-      height: 52px;
+      border-right: 1px solid #2b1e4a;
+      padding: 1rem 0.85rem;
+      width: var(--nav-width);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.3rem;
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 100;
+      overflow-y: auto;
+    }
+    .nav-brand-row {
       display: flex;
       align-items: center;
+      justify-content: flex-start;
+      padding: 0.3rem 0.6rem 0.9rem;
       gap: 1.25rem;
-      position: sticky;
-      top: 0;
-      z-index: 100;
     }
     .nav-brand {
       display: inline-flex;
@@ -53,36 +74,92 @@
       text-decoration: none;
       letter-spacing: 0.02em;
       white-space: nowrap;
+      min-width: 0;
     }
     .nav-icon {
       width: 26px;
       height: 26px;
       flex-shrink: 0;
     }
-    .nav-link {
+    .nav-collapse-toggle {
+      background: none;
+      border: 1px solid #2b1e4a;
       color: #9080b8;
-      text-decoration: none;
-      padding: 0.3rem 0.6rem;
       border-radius: 5px;
-      font-size: 0.875rem;
+      width: 22px;
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+      font-size: 0.6rem;
       transition: background 0.15s, color 0.15s;
     }
+    .nav-collapse-toggle:hover { background: #2b1e4a; color: #ede8f5; }
+    .nav-collapse-toggle .toggle-icon { display: inline-block; transition: transform 0.15s; }
+    .nav-link {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      color: #9080b8;
+      text-decoration: none;
+      padding: 0.45rem 0.6rem;
+      border-radius: 5px;
+      font-size: 0.875rem;
+      white-space: nowrap;
+      transition: background 0.15s, color 0.15s;
+    }
+    .nav-link-icon {
+      flex-shrink: 0;
+      width: 18px;
+      height: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .nav-link-icon svg { width: 100%; height: 100%; }
     .nav-link:hover { color: #ede8f5; background: #2b1e4a; }
     .nav-link.active { color: #ede8f5; background: #2b1e4a; }
-    .nav-divider { width: 1px; height: 20px; background: #2b1e4a; }
+    .nav-divider { height: 1px; width: 100%; background: #2b1e4a; margin: 0.4rem 0; }
     .nav-spacer { flex: 1; }
     .nav-user {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 0.6rem 0.2rem;
+    }
+    .nav-avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #f0c040, #b08012);
+      color: #1a1326;
+      font-weight: 700;
+      font-size: 0.75rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .nav-user-text {
       font-size: 0.8rem;
       color: #6a5888;
-      white-space: nowrap;
+      line-height: 1.3;
+      min-width: 0;
     }
     .nav-logout {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.55rem;
       font-size: 0.8rem;
       color: #9080b8;
       text-decoration: none;
-      padding: 0.25rem 0.6rem;
+      padding: 0.4rem 0.6rem;
       border-radius: 5px;
       border: 1px solid #2b1e4a;
+      margin: 0.4rem 0.6rem 0;
     }
     .nav-logout:hover { background: #2b1e4a; color: #ede8f5; }
     .nav-admin-badge {
@@ -95,14 +172,14 @@
       letter-spacing: 0.03em;
     }
 
-    /* ── Scan status badge ── */
+    /* ── Scan status badge — label on one line, date/time on the next ── */
     #scan-badge {
       font-size: 0.75rem;
       color: #d4a017;
-      white-space: nowrap;
       display: flex;
-      align-items: center;
-      gap: 0.3rem;
+      align-items: flex-start;
+      gap: 0.4rem;
+      padding: 0.3rem 0.6rem;
     }
     #scan-badge.scanning { color: #f6ad55; }
     #scan-badge .dot {
@@ -111,12 +188,16 @@
       background: currentColor;
       display: inline-block;
       flex-shrink: 0;
+      margin-top: 0.3rem;
     }
     #scan-badge.scanning .dot { animation: pulse-dot 1s ease-in-out infinite; }
     @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.3} }
+    .scan-lines { display: flex; flex-direction: column; line-height: 1.35; min-width: 0; }
+    #scan-label { font-weight: 600; }
+    #scan-text  { color: #9080b8; font-size: 0.7rem; word-break: break-word; }
 
     /* ── Main content ── */
-    main { max-width: 1440px; margin: 0 auto; padding: 1.5rem; }
+    main { max-width: 1440px; margin-left: var(--nav-width); padding: 1.5rem; }
 
     /* ── Flash messages ── */
     .flash {
@@ -447,6 +528,39 @@
       white-space: normal;
       min-width: 140px;
     }
+    /* Row-select checkboxes (Detections/Updates/My Rules) — fully custom so the
+       unchecked box isn't the browser's native white/grey; checked uses the
+       theme's gold accent instead of relying on accent-color (inconsistent
+       unchecked-state rendering across browsers). */
+    #select-all, .row-select {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 15px;
+      height: 15px;
+      border: 1.5px solid #4a3a73;
+      border-radius: 3px;
+      background: #0a0716;
+      cursor: pointer;
+      position: relative;
+      flex-shrink: 0;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    #select-all:hover, .row-select:hover { border-color: #6b5a9e; }
+    #select-all:checked, .row-select:checked {
+      background: #d4a017;
+      border-color: #d4a017;
+    }
+    #select-all:checked::after, .row-select:checked::after {
+      content: '';
+      position: absolute;
+      left: 4px;
+      top: 1px;
+      width: 4px;
+      height: 8px;
+      border: solid #1a1326;
+      border-width: 0 2px 2px 0;
+      transform: rotate(45deg);
+    }
     pre {
       background: #06040c;
       border: 1px solid #2b1e4a;
@@ -703,8 +817,48 @@
     }
     .nav-mobile-divider { height: 1px; background: #2b1e4a; margin: 0.4rem 0; }
 
+    /* ── Collapsed sidebar (desktop only — on mobile the sidebar isn't used
+       at all, see the max-width breakpoint below) ── */
+    @media (min-width: 701px) {
+      html.nav-collapsed nav { width: var(--nav-width-collapsed); padding: 1rem 0.4rem; }
+      html.nav-collapsed main { margin-left: var(--nav-width-collapsed); }
+
+      /* Hide every text label; icons (including the logo) stay */
+      html.nav-collapsed .nav-text,
+      html.nav-collapsed .nav-brand-full { display: none; }
+
+      html.nav-collapsed .nav-brand-row {
+        flex-direction: column;
+        justify-content: center;
+        gap: 0.5rem;
+        padding: 0.3rem 0 0.9rem;
+      }
+      html.nav-collapsed .nav-link { justify-content: center; padding: 0.5rem 0; }
+      html.nav-collapsed .nav-logout { padding: 0.5rem 0; }
+      html.nav-collapsed .nav-collapse-toggle .toggle-icon { transform: rotate(180deg); }
+      html.nav-collapsed #scan-badge { justify-content: center; padding: 0.3rem 0; }
+      html.nav-collapsed .nav-user { justify-content: center; padding: 0.5rem 0 0.2rem; }
+    }
+
     /* ── Responsive breakpoints ── */
     @media (max-width: 700px) {
+      /* Collapse the sidebar back to a top bar + hamburger drawer --
+         there isn't room for a fixed left panel on a small screen. */
+      nav {
+        position: sticky;
+        flex-direction: row;
+        align-items: center;
+        width: 100%;
+        height: 52px;
+        padding: 0 1.5rem;
+        border-right: none;
+        border-bottom: 1px solid #2b1e4a;
+        gap: 1.25rem;
+      }
+      .nav-brand-row { padding: 0; }
+      .nav-collapse-toggle { display: none; }
+      main { margin-left: 0; }
+
       /* Show hamburger, hide desktop nav items */
       .nav-hamburger { display: flex; }
       nav > .nav-link,
@@ -744,37 +898,112 @@
 
 {% if current_user.is_authenticated %}
 <nav>
-  <a class="nav-brand" href="{{ url_for('index') }}">
-    <img src="{{ url_for('static', filename='icon.svg') }}" class="nav-icon" alt="">
-    RuleRadar
-  </a>
+  <div class="nav-brand-row">
+    <a class="nav-brand" href="{{ url_for('index') }}" title="RuleRadar">
+      <img src="{{ url_for('static', filename='icon.svg') }}" class="nav-icon" alt="RuleRadar">
+      <span class="nav-brand-full">RuleRadar</span>
+    </a>
+    <button class="nav-collapse-toggle" id="nav-collapse-toggle" onclick="toggleSidebar()"
+            aria-label="Collapse sidebar" title="Collapse sidebar">
+      <span class="toggle-icon">◀</span>
+    </button>
+  </div>
+
   <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}"
-     href="{{ url_for('dashboard') }}">Dashboard</a>
+     href="{{ url_for('dashboard') }}" title="Dashboard">
+    <span class="nav-link-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+        <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+        <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+        <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+      </svg>
+    </span><span class="nav-text">Dashboard</span>
+  </a>
   <a class="nav-link {% if request.endpoint == 'detections' %}active{% endif %}"
-     href="{{ url_for('detections') }}">Detections</a>
+     href="{{ url_for('detections') }}" title="Detections">
+    <span class="nav-link-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="7"></circle>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </svg>
+    </span><span class="nav-text">Detections</span>
+  </a>
   <a class="nav-link {% if request.endpoint == 'updates' %}active{% endif %}"
-     href="{{ url_for('updates') }}">Updates</a>
+     href="{{ url_for('updates') }}" title="Updates">
+    <span class="nav-link-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="23 4 23 10 17 10"></polyline>
+        <polyline points="1 20 1 14 7 14"></polyline>
+        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+      </svg>
+    </span><span class="nav-text">Updates</span>
+  </a>
   <a class="nav-link {% if request.endpoint == 'history' %}active{% endif %}"
-     href="{{ url_for('history') }}">History</a>
+     href="{{ url_for('history') }}" title="History">
+    <span class="nav-link-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"></circle>
+        <polyline points="12 7 12 12 15.5 14"></polyline>
+      </svg>
+    </span><span class="nav-text">History</span>
+  </a>
   <a class="nav-link {% if request.endpoint == 'my_rules' %}active{% endif %}"
-     href="{{ url_for('my_rules') }}">My Rules</a>
+     href="{{ url_for('my_rules') }}" title="My Rules">
+    <span class="nav-link-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="12 2.5 15.09 8.76 22 9.76 17 14.64 18.18 21.52 12 18.2 5.82 21.52 7 14.64 2 9.76 8.91 8.76"></polygon>
+      </svg>
+    </span><span class="nav-text">My Rules</span>
+  </a>
 
   <span class="nav-divider"></span>
 
   <a class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}"
-     href="{{ url_for('settings') }}">Settings</a>
+     href="{{ url_for('settings') }}" title="Settings">
+    <span class="nav-link-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+    </span><span class="nav-text">Settings</span>
+  </a>
   {% if current_user.is_admin %}
   <a class="nav-link {% if request.endpoint == 'admin' %}active{% endif %}"
-     href="{{ url_for('admin') }}">Admin</a>
+     href="{{ url_for('admin') }}" title="Admin">
+    <span class="nav-link-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+        <polyline points="9 12 11 14 15 10"></polyline>
+      </svg>
+    </span><span class="nav-text">Admin</span>
+  </a>
   {% endif %}
 
   <span class="nav-spacer"></span>
-  <span id="scan-badge"><span class="dot"></span><span id="scan-text">Loading…</span></span>
-  <span class="nav-user">
-    {{ current_user.username }}
-    {% if current_user.is_admin %}<span class="nav-admin-badge">admin</span>{% endif %}
+  <span id="scan-badge">
+    <span class="dot"></span>
+    <span class="scan-lines nav-text">
+      <span id="scan-label">Loading…</span>
+      <span id="scan-text"></span>
+    </span>
   </span>
-  <a class="nav-logout" href="{{ url_for('logout') }}">Log out</a>
+  <span class="nav-user" title="{{ current_user.username }}{% if current_user.is_admin %} — admin{% endif %}">
+    <span class="nav-avatar">{{ current_user.username[0] | upper }}</span>
+    <span class="nav-user-text nav-text">
+      {{ current_user.username }}
+      {% if current_user.is_admin %}<span class="nav-admin-badge">admin</span>{% endif %}
+    </span>
+  </span>
+  <a class="nav-logout" href="{{ url_for('logout') }}" title="Log out">
+    <span class="nav-link-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+        <polyline points="16 17 21 12 16 7"></polyline>
+        <line x1="21" y1="12" x2="9" y2="12"></line>
+      </svg>
+    </span><span class="nav-text">Log out</span>
+  </a>
 
   <!-- Mobile hamburger -->
   <button class="nav-hamburger" id="nav-hamburger" aria-label="Menu" aria-expanded="false"
@@ -827,21 +1056,40 @@
  * last scan timestamp.  No scan is triggered by this function — scans
  * are owned by the scheduler (scheduler.py) and the initial setup flow.
  */
+/* Short relative time ("Just now", "5m ago", "3h ago", "2d ago") -- the
+ * exact timestamp is still available as the badge's hover tooltip. */
+function timeAgo(iso) {
+  const diffSec = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (diffSec < 45) return 'Just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return diffMin + 'm ago';
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return diffHr + 'h ago';
+  return Math.floor(diffHr / 24) + 'd ago';
+}
+
 async function refreshScanBadge() {
   try {
     const res   = await fetch('/api/scan/status');
     const data  = await res.json();
     const badge = document.getElementById('scan-badge');
+    const label = document.getElementById('scan-label');
     const text  = document.getElementById('scan-text');
     if (data.is_scanning) {
-      badge.className  = 'scanning';
-      text.textContent = 'Scanning…';
+      badge.className   = 'scanning';
+      badge.title       = 'Scan in progress';
+      label.textContent = 'Scanning';
+      text.textContent  = '';
     } else if (data.last_scan) {
-      badge.className  = '';
-      text.textContent = 'Last scan: ' + new Date(data.last_scan).toLocaleString();
+      badge.className   = '';
+      badge.title       = new Date(data.last_scan).toLocaleString();
+      label.textContent = 'Last scan';
+      text.textContent  = timeAgo(data.last_scan);
     } else {
-      badge.className  = '';
-      text.textContent = 'No scan yet';
+      badge.className   = '';
+      badge.title       = '';
+      label.textContent = 'No scan yet';
+      text.textContent  = '';
     }
     // Allow page-specific code to react to scan status changes without
     // making a second HTTP request.
@@ -853,6 +1101,12 @@ async function refreshScanBadge() {
 
 refreshScanBadge();
 setInterval(refreshScanBadge, 15000);
+
+/* ── Sidebar collapse ─────────────────────────────────────────────────── */
+function toggleSidebar() {
+  const collapsed = document.documentElement.classList.toggle('nav-collapsed');
+  try { localStorage.setItem('navCollapsed', collapsed ? '1' : '0'); } catch (_) {}
+}
 
 /* ── Shared across Detections/Updates: expand rows, bulk-select, favoriting ── */
 
