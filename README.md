@@ -5,7 +5,7 @@
   <img src="webapp/static/title.svg" alt="RuleRadar">
 </p>
 
-Monitors detection rule repositories for new, modified, deleted, and renamed rules. Supports [SigmaHQ/sigma](https://github.com/SigmaHQ/sigma), [splunk/security_content](https://github.com/splunk/security_content), [elastic/detection-rules](https://github.com/elastic/detection-rules), [panther-labs/panther-analysis](https://github.com/panther-labs/panther-analysis), [sublime-security/sublime-rules](https://github.com/sublime-security/sublime-rules), and [anvilogic-forge/armory](https://github.com/anvilogic-forge/armory) out of the box — with support for adding custom repositories. All data is stored in a local SQLite database and browsable through a built-in web interface. No config files required — everything is configured through the web UI.
+Monitors detection rule repositories for new, modified, deleted, and renamed rules — with full diff tracking and per-rule modification history. Supports [SigmaHQ/sigma](https://github.com/SigmaHQ/sigma), [splunk/security_content](https://github.com/splunk/security_content), [elastic/detection-rules](https://github.com/elastic/detection-rules), [panther-labs/panther-analysis](https://github.com/panther-labs/panther-analysis), [sublime-security/sublime-rules](https://github.com/sublime-security/sublime-rules), and [anvilogic-forge/armory](https://github.com/anvilogic-forge/armory) out of the box — with support for adding custom repositories by pasting a GitHub URL. All data is stored in a local SQLite database and browsable through a built-in web interface. No config files required — everything is configured through the web UI.
 
 <p align="center">
   <img src="docs/Dashboard.png" alt="RuleRadar — Dashboard" width="900">
@@ -16,13 +16,15 @@ Monitors detection rule repositories for new, modified, deleted, and renamed rul
 Every two hours RuleRadar:
 1. Fetches changes from all configured repos via `git fetch` and diffs against the last known commit
 2. Parses new and modified rule files (`.yml`/`.yaml` for most repos; `.toml` for Elastic)
-3. Extracts titles, descriptions, MITRE ATT&CK mappings, and detection logic per source format
-4. Persists every detection and change event to SQLite
-5. Sends a summary to every user who has a personal Discord webhook configured
+3. Extracts titles, descriptions, and MITRE ATT&CK technique IDs — the same regex-based extraction for every source, native or custom
+4. Computes a full diff against each file's previously stored version
+5. Persists every detection, diff, and change event to SQLite
+6. Sends a summary to every user who has a personal Discord webhook configured
 
 The web interface provides:
-- **Detections** — filter by title, description, source, MITRE TTP, and time window; keyword search across detection logic, author, and references; saved filter presets
-- **Updates** — chronological feed of new, modified, deleted, and renamed rules, filterable by source, change type, and time window
+- **Detections** — filter by title, source, MITRE TTP, and time window; every rule's full file is stored and searchable; expand a row for its description, MITRE TTPs, references, and complete file contents
+- **Updates** — chronological feed of new, modified, deleted, and renamed rules; modified/renamed/deleted entries expand to a full colorized diff against the previous version, with a line-change count
+- **History** — search for any rule to see its current file alongside its last 5 modifications, each with a date and diff
 - **Settings** — per-user Discord webhook, saved filter presets, password change
 - **Admin** — add/remove users, reset passwords, grant/revoke admin access, manage monitored repositories
 
@@ -220,7 +222,7 @@ docker rmi tsloats/ruleradar:latest
 
 | Setting | Where | Description |
 |---------|-------|-------------|
-| Monitored repos | Admin → Monitored Repositories | Enable any of the six built-in repos (Sigma, Splunk, Elastic, Panther, Sublime, Anvilogic) or add your own custom repository. Repos are cloned locally via git — no API token required. |
+| Monitored repos | Admin → Monitored Repositories | Enable any of the six built-in repos (Sigma, Splunk, Elastic, Panther, Sublime, Anvilogic) or add a custom one by pasting its GitHub URL — owner, repo, branch, and path are parsed automatically. Repos are cloned locally via git — no API token required. |
 | Discord webhook | Settings → Discord Notifications | Per-user webhook for scan summaries. Create one in Discord: Server Settings → Integrations → Webhooks. |
 | Saved filters | Settings → Saved Filters | Named presets (source, change type, title, MITRE TTP, time window) that appear as quick-access buttons on the Detections and Updates pages. |
 | Users | Admin → Users | Add users, reset passwords, grant/revoke admin, delete users. |
