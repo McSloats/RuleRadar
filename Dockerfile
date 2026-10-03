@@ -23,6 +23,16 @@ COPY . .
 # The docker-compose volume is mounted here, so both containers share the DB.
 RUN mkdir -p /app/data
 
+# Run as an unprivileged user rather than root (default container user
+# otherwise). UID/GID 568 matches TrueNAS SCALE's "apps" user, which the
+# TrueNAS deployment docs already require the host dataset to be owned by
+# -- so this doesn't introduce a new permission mismatch there, and for
+# plain `docker compose`/`docker run` the named volume is initialized with
+# this ownership automatically, no host-side chown needed.
+RUN groupadd -g 568 ruleradar && useradd -u 568 -g 568 -M -d /app ruleradar \
+    && chown -R ruleradar:ruleradar /app
+USER ruleradar
+
 # Web service listens on 5000
 EXPOSE 5000
 

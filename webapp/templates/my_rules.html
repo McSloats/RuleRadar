@@ -1,0 +1,250 @@
+{% extends "layout.html" %}
+{% block title %}My Rules — RuleRadar{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+  <h2>My Rules</h2>
+</div>
+
+{% if filter_count == 0 %}
+
+<div class="empty-state">
+  <p>
+    <strong>My Rules</strong> is your personal, curated list of favorite detection rules.
+    <br><br>
+    Build it out from <a href="{{ url_for('detections') }}">Detections</a> or
+    <a href="{{ url_for('updates') }}">Updates</a> — click the <strong>⊕</strong> button on
+    any rule row, or tick the checkboxes on several rows and use
+    <strong>"Add Selected to My Rules."</strong>
+    <br><br>
+    Once you've favorited a few, they'll show up here for quick access, and you can
+    remove any of them at any time.
+  </p>
+</div>
+
+{% else %}
+
+<p class="result-count">
+  {{ rows | length }} rule{{ 's' if rows | length != 1 else '' }} favorited
+</p>
+
+{# Bulk remove bar #}
+<div class="bulk-action-bar" id="bulk-bar" style="display:none;">
+  <span id="bulk-count">0</span> selected
+  <button class="btn btn-danger btn-sm" onclick="removeSelected()">✕ Remove Selected</button>
+  <button class="btn btn-secondary btn-sm" onclick="clearSelection()">Clear</button>
+</div>
+
+{% if rows %}
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th style="width:30px;" onclick="event.stopPropagation()">
+          <input type="checkbox" id="select-all" title="Select all">
+        </th>
+        <th style="width:22px;"></th>
+        <th>Title</th>
+        <th style="width:175px;">MITRE TTPs</th>
+        <th style="width:140px;">Date</th>
+        <th style="width:100px;">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      {# ── Data row ── #}
+      <tr class="data-row" onclick="toggleDetail(this)">
+        <td onclick="event.stopPropagation()">
+          {% if row._filter_id %}
+            <input type="checkbox" class="row-select"
+                   data-filter-id="{{ row._filter_id }}"
+                   onchange="updateBulkBar()">
+          {% endif %}
+        </td>
+        <td><span class="expand-arrow">▶</span></td>
+        <td><strong>{{ row.title }}</strong></td>
+        <td onclick="event.stopPropagation()" class="mitre-cell">
+          {% if row.mitre_techniques %}
+            {% for tech in row.mitre_techniques.split('|') %}
+              <span class="badge badge-mitre">{{ tech }}</span>
+            {% endfor %}
+          {% else %}
+            <span class="text-muted text-small">—</span>
+          {% endif %}
+        </td>
+        <td class="nowrap text-muted text-small">
+          {{ row.last_updated | format_dt }}
+        </td>
+        <td onclick="event.stopPropagation()" style="white-space:nowrap;">
+          {% if row.rule_url %}
+            <a href="{{ row.rule_url }}" target="_blank" rel="noopener"
+               class="text-small" style="margin-right:0.4rem;">GitHub ↗</a>
+          {% endif %}
+          {% if row._filter_id %}
+            <form method="post" action="{{ url_for('rule_filter_delete', filter_id=row._filter_id) }}"
+                  style="display:inline;" onsubmit="return confirm('Remove this rule from My Rules?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-sm btn-danger" title="Remove from My Rules">✕</button>
+            </form>
+          {% endif %}
+        </td>
+      </tr>
+
+      {# ── Expandable detail row — same format as Detections ── #}
+      <tr class="detail-row">
+        <td colspan="6">
+
+          <p class="detail-label">Description</p>
+          <p class="detail-text{{ '' if row.description else ' text-muted' }}">
+            {{ row.description or 'No description available.' }}
+          </p>
+
+          <p class="detail-label" style="margin-top:0.6rem;">MITRE TTPs</p>
+          {% if row.mitre_techniques %}
+            <div class="detail-mitre">
+              {% for tech in row.mitre_techniques.split('|') %}
+                <span class="badge badge-mitre">{{ tech }}</span>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="detail-text text-muted">Could not identify</p>
+          {% endif %}
+
+          <p class="detail-label" style="margin-top:0.6rem;">References</p>
+          {% if row.refs %}
+            <ul class="detail-refs">
+              {% for ref in row.refs.split('\n') if ref.strip() %}
+                <li>
+                  {% if ref.strip().startswith('http') %}
+                    <a href="{{ ref.strip() }}" target="_blank" rel="noopener"
+                       class="text-small">{{ ref.strip() }}</a>
+                  {% else %}
+                    <span class="text-small">{{ ref.strip() }}</span>
+                  {% endif %}
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="detail-text text-muted">No references listed.</p>
+          {% endif %}
+
+          {% if row.raw_content %}
+          <details class="inline-action" style="margin-top:0.6rem;">
+            <summary style="cursor:pointer; font-size:0.8rem; color:#d4a017;">
+              View full file contents
+            </summary>
+            <pre class="detail-raw">{{ row.raw_content }}</pre>
+          </details>
+          {% endif %}
+
+          <p class="detail-label" style="margin-top:0.6rem;">History</p>
+          <p class="detail-text">
+            <a href="{{ url_for('history', source=row.source, file_path=row.file_path) }}">View full history →</a>
+          </p>
+
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{# ── Pattern-based filters — CSV-uploaded criteria not tied to one exact rule ── #}
+{% if pattern_filters %}
+<div class="card" style="margin-top:1.5rem;">
+  <div class="card-title">Pattern-Based Filters</div>
+  <p class="text-muted text-small" style="margin-bottom:0.75rem;">
+    These match by title/source pattern rather than one specific rule (usually from a CSV
+    upload), so each can match more than one rule in the list above.
+  </p>
+  <div class="table-wrap">
+    <table class="static-table">
+      <thead>
+        <tr>
+          <th>Title Pattern</th>
+          <th style="width:90px;">Source</th>
+          <th style="width:150px;">Added</th>
+          <th style="width:80px;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for f in pattern_filters %}
+        <tr>
+          <td class="text-small">{{ f.title_pattern or '—' }}</td>
+          <td>
+            {% if f.source %}
+              <span class="badge badge-{{ f.source }}">{{ f.source }}</span>
+            {% else %}
+              <span class="text-muted text-small">any</span>
+            {% endif %}
+          </td>
+          <td class="text-muted text-small nowrap">{{ f.created_at | format_dt }}</td>
+          <td>
+            <form method="post" action="{{ url_for('rule_filter_delete', filter_id=f.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-sm btn-danger"
+                      onclick="return confirm('Remove this entry?');">Remove</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{# ── Bulk management: clear all + CSV upload ── #}
+<div class="card" style="margin-top:1.5rem;">
+  <div class="card-title">Bulk Management</div>
+  <div style="margin-bottom:1rem;">
+    <form method="post" action="{{ url_for('rule_filter_clear') }}"
+          onsubmit="return confirm('Clear all {{ filter_count }} entries?');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-danger btn-sm">Clear All ({{ filter_count }})</button>
+    </form>
+  </div>
+  <form method="post" action="{{ url_for('rule_filter_upload') }}"
+        enctype="multipart/form-data" style="max-width:520px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-group">
+      <label>Upload CSV <span class="text-muted">(adds to any existing entries)</span></label>
+      <input type="file" name="csv_file" accept=".csv" class="wide" required>
+      <p class="hint" style="margin-top:0.4rem;">
+        Columns: <code>rule_id</code>, <code>title</code>, <code>source</code> — at least
+        one must be filled per row. Case-insensitive title matching (LIKE).
+        <a href="{{ url_for('rule_filter_sample_csv') }}" style="color:#d4a017;">
+          Download sample CSV ↓
+        </a>
+      </p>
+    </div>
+    <button type="submit" class="btn btn-primary">Upload CSV</button>
+  </form>
+</div>
+
+{% endif %}
+
+<script>
+function removeSelected() {
+  const ids = Array.from(document.querySelectorAll('.row-select:checked')).map(cb => cb.dataset.filterId);
+  if (!ids.length) return;
+  if (!confirm(`Remove ${ids.length} rule(s) from My Rules?`)) return;
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = '{{ url_for("my_rules_remove") }}';
+  const csrf = document.createElement('input');
+  csrf.type = 'hidden'; csrf.name = 'csrf_token'; csrf.value = _csrfToken;
+  form.appendChild(csrf);
+  ids.forEach(id => {
+    const inp = document.createElement('input');
+    inp.type = 'hidden'; inp.name = 'filter_id'; inp.value = id;
+    form.appendChild(inp);
+  });
+  document.body.appendChild(form);
+  form.submit();
+}
+</script>
+
+{% endblock %}

@@ -207,6 +207,13 @@ def init_db():
         # Clear any stale scanning flag left over from a previous crash
         conn.execute("UPDATE scan_status SET is_scanning = 0 WHERE id = 1")
 
+    # The DB holds bcrypt password hashes and users' Discord webhook URLs --
+    # tighten to owner-only on every startup (covers the default umask
+    # permissions SQLite created it with, and re-tightens pre-existing files).
+    for path in (DB_PATH, DB_PATH.with_name(DB_PATH.name + "-wal"), DB_PATH.with_name(DB_PATH.name + "-shm")):
+        if path.exists():
+            path.chmod(0o600)
+
 
 def _migrate_schema(conn: sqlite3.Connection):
     """
@@ -558,6 +565,19 @@ def clear_user_rule_filters(user_id: int) -> int:
         cur = conn.execute(
             "DELETE FROM user_rule_filters WHERE user_id = ?",
             (user_id,),
+        )
+    return cur.rowcount
+
+
+def delete_user_rule_filters_bulk(user_id: int, filter_ids: list[int]) -> int:
+    """Delete multiple filter rows by id, scoped to the given user. Returns the count deleted."""
+    if not filter_ids:
+        return 0
+    placeholders = ",".join("?" * len(filter_ids))
+    with get_conn() as conn:
+        cur = conn.execute(
+            f"DELETE FROM user_rule_filters WHERE user_id = ? AND id IN ({placeholders})",
+            [user_id, *filter_ids],
         )
     return cur.rowcount
 
@@ -1034,6 +1054,7 @@ def get_updates(
         f"       COALESCE(d.refs,             '') AS refs,"
         f"       COALESCE(d.mitre_techniques, '') AS mitre_techniques,"
         f"       COALESCE(d.raw_content,      '') AS raw_content,"
+        f"       COALESCE(d.rule_id,          '') AS rule_id,"
         f"       NULL AS tag_name, NULL AS body"
         f" FROM updates u {join} {u_where}"
     )
@@ -1063,6 +1084,7 @@ def get_updates(
         f"       '' AS author, '' AS rule_status, '' AS rule_date,"
         f"       '' AS description, '' AS refs,"
         f"       '' AS mitre_techniques, '' AS raw_content,"
+        f"       '' AS rule_id,"
         f"       r.tag_name, r.body"
         f" FROM releases r {r_where}"
     )

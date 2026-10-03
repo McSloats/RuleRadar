@@ -38,6 +38,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import re
 import secrets
 import shutil
@@ -81,17 +82,34 @@ def _load_secret_key() -> str:
     Load or generate a persistent secret key for session signing.
     Stored alongside the database so it survives container restarts
     when the DB volume is mounted (Docker).
+
+    Written with 0600 permissions (owner read/write only) -- this key signs
+    every session cookie, so anyone else able to read it could forge a valid
+    session for any user, including admin, without ever touching a password.
     """
     key_path = db.DB_PATH.parent / ".secret_key"
     if key_path.exists():
+        key_path.chmod(0o600)  # tighten in case it predates this check
         return key_path.read_text().strip()
     key_path.parent.mkdir(parents=True, exist_ok=True)
     key = secrets.token_hex(32)
-    key_path.write_text(key)
+    fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(key)
     return key
 
 
 app.secret_key = _load_secret_key()
+
+# HttpOnly and SameSite are safe to force unconditionally. Secure can't be --
+# the documented default deployment is plain HTTP on a LAN (http://localhost:5000
+# or a bare IP), and a Secure cookie is silently dropped by the browser over HTTP,
+# which would break login entirely. Tie it to RULERADAR_SITE_URL (already used for
+# Discord notification links) so it only turns on once an operator declares this
+# instance is actually served over HTTPS.
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("RULERADAR_SITE_URL", "").startswith("https://")
 
 csrf = CSRFProtect(app)
 
@@ -666,6 +684,9 @@ def updates():
             added, removed = ruleradar.diff_stats(row["diff_text"])
             row["diff_added"], row["diff_removed"] = added, removed
 
+    # Build set of rule_ids already favorited, for per-row button state
+    filtered_rule_ids = {f["rule_id"] for f in rule_filter_rows if f.get("rule_id")}
+
     return render_template(
         "updates.html",
         rows=rows, total=total,
@@ -675,6 +696,7 @@ def updates():
         saved_filters=_get_saved_filters(),
         rule_filter_count=len(rule_filter_rows),
         filter_active=filter_active,
+        filtered_rule_ids=filtered_rule_ids,
     )
 
 
@@ -728,15 +750,39 @@ def toggle_filter_updates():
     return redirect(url_for("updates"))
 
 
-# ── Rule filter routes ─────────────────────────────────────────────────────────
+# ── My Rules (favorited rules) ──────────────────────────────────────────────────
 
-@app.route("/settings/rule-filter")
+@app.route("/my-rules")
 @login_required
-def rule_filter_page():
-    """Management page: full table of the user's rule-filter entries."""
+def my_rules():
+    """
+    Dedicated page for the user's favorited rules: a Detections-style view
+    limited to whatever they've favorited from Detections/Updates, plus easy
+    bulk removal.
+
+    Favorite rows (added via the "⊕" button or bulk "Add Selected") always
+    carry an exact rule_id, so each matched detection maps back to exactly
+    one filter row for removal. CSV-uploaded title/source-only patterns can
+    match many rules at once and have no single row to attribute a removal
+    to, so those are listed separately as raw criteria.
+    """
     filters = db.get_user_rule_filters(current_user.id)
-    return render_template("rule_filter.html", filters=filters,
-                           filter_count=len(filters))
+
+    rows: list[dict] = []
+    pattern_filters: list[dict] = []
+    if filters:
+        filter_id_by_rule_id = {f["rule_id"]: f["id"] for f in filters if f["rule_id"]}
+        pattern_filters = [f for f in filters if not f["rule_id"]]
+        rows, _ = db.search_detections(user_filter_rows=filters, per_page=500)
+        for row in rows:
+            row["_filter_id"] = filter_id_by_rule_id.get(row.get("rule_id"))
+
+    return render_template(
+        "my_rules.html",
+        rows=rows,
+        filter_count=len(filters),
+        pattern_filters=pattern_filters,
+    )
 
 
 @app.route("/settings/rule-filter/sample.csv")
@@ -763,7 +809,7 @@ def rule_filter_upload():
     f = request.files.get("csv_file")
     if not f or not f.filename:
         flash("Please select a CSV file to upload.", "error")
-        return redirect(url_for("settings"))
+        return redirect(url_for("my_rules"))
 
     try:
         text    = f.read().decode("utf-8-sig", errors="replace")
@@ -777,20 +823,20 @@ def rule_filter_upload():
                 rows.append({"rule_id": rid, "title": pat, "source": src})
     except Exception as e:
         flash(f"Could not parse CSV: {e}", "error")
-        return redirect(url_for("settings"))
+        return redirect(url_for("my_rules"))
 
     if not rows:
         flash("The CSV contained no valid rows.", "error")
-        return redirect(url_for("settings"))
+        return redirect(url_for("my_rules"))
 
     added = db.add_user_rule_filters_bulk(current_user.id, rows)
     total = db.get_user_rule_filter_count(current_user.id)
     db.log_activity("user", f"Rule filter CSV uploaded ({added} added)",
                     actor=current_user.username,
                     detail=f"rows_in_file={len(rows)}, new={added}, total={total}")
-    flash(f"Filter updated: {added} new entr{'ies' if added != 1 else 'y'} added "
-          f"({total} total active).", "success")
-    return redirect(url_for("settings"))
+    flash(f"My Rules updated: {added} new entr{'ies' if added != 1 else 'y'} added "
+          f"({total} total).", "success")
+    return redirect(url_for("my_rules"))
 
 
 @app.route("/settings/rule-filter/clear", methods=["POST"])
@@ -800,9 +846,21 @@ def rule_filter_clear():
     deleted = db.clear_user_rule_filters(current_user.id)
     db.log_activity("user", f"Rule filter cleared ({deleted} entries removed)",
                     actor=current_user.username)
-    flash(f"Filter cleared — {deleted} entr{'ies' if deleted != 1 else 'y'} removed.",
+    flash(f"My Rules cleared — {deleted} entr{'ies' if deleted != 1 else 'y'} removed.",
           "success")
-    return redirect(url_for("settings"))
+    return redirect(url_for("my_rules"))
+
+
+@app.route("/my-rules/remove", methods=["POST"])
+@login_required
+def my_rules_remove():
+    """Bulk-remove selected favorites (checkbox form submit from My Rules)."""
+    filter_ids = [int(v) for v in request.form.getlist("filter_id") if v.isdigit()]
+    deleted = db.delete_user_rule_filters_bulk(current_user.id, filter_ids)
+    db.log_activity("user", f"Removed {deleted} favorite rule(s) from My Rules",
+                    actor=current_user.username)
+    flash(f"Removed {deleted} rule{'s' if deleted != 1 else ''} from My Rules.", "success")
+    return redirect(url_for("my_rules"))
 
 
 @app.route("/settings/rule-filter/add", methods=["POST"])
@@ -837,7 +895,7 @@ def rule_filter_add_bulk():
 def rule_filter_delete(filter_id: int):
     """Delete one rule-filter entry by id (must belong to the current user)."""
     db.delete_user_rule_filter(current_user.id, filter_id)
-    return redirect(url_for("rule_filter_page"))
+    return redirect(url_for("my_rules"))
 
 
 # ── Settings ───────────────────────────────────────────────────────────────────
@@ -873,7 +931,6 @@ def settings():
         last_scan_display=last_scan_display,
         next_scan_display=next_scan_display,
         repos=repos,
-        rule_filter_count=db.get_user_rule_filter_count(current_user.id),
     )
 
 
@@ -1128,6 +1185,13 @@ def admin_repos_add():
             or detect_default_branch(owner, repo)
             or "main"
         )
+        if branch.startswith("-"):
+            # branch is passed as a literal git argument (git_run([..., branch]));
+            # a leading "-" could be misread as a flag rather than a ref name.
+            # git itself never produces ref names starting with "-", so this
+            # only rejects malformed input, never a real branch.
+            flash("Branch name can't start with '-'.", "error")
+            return redirect(url_for("admin"))
         display_name = request.form.get("display_name", "").strip() or f"{owner} / {repo}"
         paths_raw     = request.form.get("paths", "").strip() or (parsed["path"] or "")
         parser        = request.form.get("parser", "sigma")

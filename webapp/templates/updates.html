@@ -128,7 +128,7 @@ function toggleFilterPanel() {
     <button type="submit" class="rule-filter-switch-btn">Switch to All Rules</button>
   </form>
   to see everything.
-  <a href="{{ url_for('rule_filter_page') }}" class="rule-filter-bar-link"
+  <a href="{{ url_for('my_rules') }}" class="rule-filter-bar-link"
      style="margin-left:0.25rem;">Manage →</a>
 </div>
 {% endif %}
@@ -144,22 +144,45 @@ function toggleFilterPanel() {
 
 {# ── Results table ────────────────────────────────────────────────────────── #}
 {% if rows %}
+
+{# Bulk action bar (hidden until a checkbox is ticked) #}
+<div class="bulk-action-bar" id="bulk-bar" style="display:none;">
+  <span id="bulk-count">0</span> selected
+  <button class="btn btn-primary btn-sm" onclick="addSelectedToFilter()">
+    ⊕ Add Selected to My Rules
+  </button>
+  <button class="btn btn-secondary btn-sm" onclick="clearSelection()">Clear</button>
+</div>
+
 <div class="table-wrap">
   <table>
     <thead>
       <tr>
+        <th style="width:30px;" onclick="event.stopPropagation()">
+          <input type="checkbox" id="select-all" title="Select all">
+        </th>
         <th style="width:22px;"></th>
         <th>Title</th>
         <th style="width:80px;">Source</th>
         <th style="width:90px;">Change</th>
         <th style="width:150px;">Detected</th>
-        <th style="width:70px;">Link</th>
+        <th style="width:100px;">Actions</th>
       </tr>
     </thead>
     <tbody>
       {% for row in rows %}
+      {% set is_filtered = row.rule_id and row.rule_id in filtered_rule_ids %}
       {# ── Data row ── #}
       <tr class="data-row" onclick="toggleDetail(this)">
+        <td onclick="event.stopPropagation()">
+          {% if row.rule_id %}
+            <input type="checkbox" class="row-select"
+                   data-rule-id="{{ row.rule_id }}"
+                   data-title="{{ row.title | replace('"', '&quot;') }}"
+                   data-source="{{ row.source }}"
+                   onchange="updateBulkBar()">
+          {% endif %}
+        </td>
         <td><span class="expand-arrow">▶</span></td>
         <td><strong>{{ row.title }}</strong></td>
         <td><span class="badge badge-{{ row.source }}">{{ row.source }}</span></td>
@@ -167,17 +190,24 @@ function toggleFilterPanel() {
         <td class="nowrap text-muted text-small">
           {{ row.detected_at | format_dt }}
         </td>
-        <td onclick="event.stopPropagation()">
+        <td onclick="event.stopPropagation()" style="white-space:nowrap;">
           {% if row.rule_url %}
             <a href="{{ row.rule_url }}" target="_blank" rel="noopener"
-               class="text-small">GitHub ↗</a>
+               class="text-small" style="margin-right:0.4rem;">GitHub ↗</a>
+          {% endif %}
+          {% if row.rule_id %}
+          <button class="btn btn-sm filter-btn {% if is_filtered %}filter-btn-active{% endif %}"
+                  {% if is_filtered %}disabled{% endif %}
+                  onclick="addToFilter(this, '{{ row.rule_id }}', '{{ row.title | replace("'", "\\'") }}', '{{ row.source }}')">
+            {{ '✓' if is_filtered else '⊕' }}
+          </button>
           {% endif %}
         </td>
       </tr>
 
       {# ── Expandable detail row ── #}
       <tr class="detail-row">
-        <td colspan="6">
+        <td colspan="7">
 
           {% if row.change_type == 'release' %}
 
@@ -197,6 +227,11 @@ function toggleFilterPanel() {
 
           {# ── Diff detail — the only thing shown for a changed file ── #}
           {{ diff_block(row.diff_text, row.diff_added, row.diff_removed) }}
+
+          <p class="detail-label" style="margin-top:0.6rem;">History</p>
+          <p class="detail-text">
+            <a href="{{ url_for('history', source=row.source, file_path=row.file_path) }}">View full history →</a>
+          </p>
 
           {% else %}
 
@@ -237,6 +272,11 @@ function toggleFilterPanel() {
             <pre class="detail-raw">{{ row.raw_content }}</pre>
           </details>
           {% endif %}
+
+          <p class="detail-label" style="margin-top:0.6rem;">History</p>
+          <p class="detail-text">
+            <a href="{{ url_for('history', source=row.source, file_path=row.file_path) }}">View full history →</a>
+          </p>
 
           {% endif %}
 
@@ -288,7 +328,7 @@ function toggleFilterPanel() {
                   style="font-size:0.85rem;">Switch to All Rules</button>
         </form>
         to see all updates, or
-        <a href="{{ url_for('rule_filter_page') }}" style="color:#d4a017;">manage your filter →</a>
+        <a href="{{ url_for('my_rules') }}" style="color:#d4a017;">manage your filter →</a>
       {% endif %}
     {% else %}
       No updates recorded yet.<br>
@@ -298,15 +338,5 @@ function toggleFilterPanel() {
   </p>
 </div>
 {% endif %}
-
-<script>
-function toggleDetail(row) {
-  const detail = row.nextElementSibling;
-  const arrow  = row.querySelector('.expand-arrow');
-  const open   = detail.style.display !== 'table-row';
-  detail.style.display = open ? 'table-row' : 'none';
-  arrow.textContent = open ? '▼' : '▶';
-}
-</script>
 
 {% endblock %}

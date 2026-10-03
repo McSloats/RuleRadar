@@ -498,6 +498,39 @@
     .history-entry { padding: 0.75rem 0; }
     .history-entry-divider { border-bottom: 1px solid #180d30; margin-bottom: 0.75rem; }
 
+    /* Bulk action bar (Detections/Updates/My Rules row selection) */
+    .bulk-action-bar {
+      background: #160f2a;
+      border: 1px solid #2b1e4a;
+      border-radius: 6px;
+      padding: 0.45rem 0.85rem;
+      font-size: 0.82rem;
+      color: #9080b8;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+    }
+
+    /* Add-to-My-Rules button (Detections/Updates row "⊕") */
+    .filter-btn {
+      background: #0a0716;
+      border: 1px solid #2b1e4a;
+      color: #9080b8;
+      padding: 0.15rem 0.45rem;
+      font-size: 0.75rem;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .filter-btn:hover { background: #2b1e4a; color: #c4b5fd; }
+    .filter-btn-active {
+      background: #14301f;
+      border-color: #1a5c38;
+      color: #6ee7b7;
+      cursor: default;
+    }
+
     /* ── Pagination ── */
     .pagination {
       display: flex;
@@ -723,6 +756,8 @@
      href="{{ url_for('updates') }}">Updates</a>
   <a class="nav-link {% if request.endpoint == 'history' %}active{% endif %}"
      href="{{ url_for('history') }}">History</a>
+  <a class="nav-link {% if request.endpoint == 'my_rules' %}active{% endif %}"
+     href="{{ url_for('my_rules') }}">My Rules</a>
 
   <span class="nav-divider"></span>
 
@@ -763,6 +798,8 @@
      href="{{ url_for('updates') }}">Updates</a>
   <a class="nav-link {% if request.endpoint == 'history' %}active{% endif %}"
      href="{{ url_for('history') }}">History</a>
+  <a class="nav-link {% if request.endpoint == 'my_rules' %}active{% endif %}"
+     href="{{ url_for('my_rules') }}">My Rules</a>
   <div class="nav-mobile-divider"></div>
   <a class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}"
      href="{{ url_for('settings') }}">Settings</a>
@@ -816,6 +853,100 @@ async function refreshScanBadge() {
 
 refreshScanBadge();
 setInterval(refreshScanBadge, 15000);
+
+/* ── Shared across Detections/Updates: expand rows, bulk-select, favoriting ── */
+
+function toggleDetail(row) {
+  const detail = row.nextElementSibling;
+  const arrow  = row.querySelector('.expand-arrow');
+  const open   = detail.style.display !== 'table-row';
+  detail.style.display = open ? 'table-row' : 'none';
+  arrow.textContent = open ? '▼' : '▶';
+}
+
+document.getElementById('select-all')?.addEventListener('change', function () {
+  document.querySelectorAll('.row-select').forEach(cb => cb.checked = this.checked);
+  updateBulkBar();
+});
+
+function updateBulkBar() {
+  const n   = document.querySelectorAll('.row-select:checked').length;
+  const bar = document.getElementById('bulk-bar');
+  if (!bar) return;
+  document.getElementById('bulk-count').textContent = n;
+  bar.style.display = n > 0 ? 'flex' : 'none';
+}
+
+function clearSelection() {
+  document.querySelectorAll('.row-select').forEach(cb => cb.checked = false);
+  const selectAll = document.getElementById('select-all');
+  if (selectAll) selectAll.checked = false;
+  updateBulkBar();
+}
+
+const _csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+/* Favorite one rule into My Rules (Detections/Updates row "⊕" button) */
+async function addToFilter(btn, ruleId, title, source) {
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/settings/rule-filter/add', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': _csrfToken},
+      body:    JSON.stringify({rule_id: ruleId, title: title, source: source}),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      btn.textContent = '✓';
+      btn.classList.add('filter-btn-active');
+      updateFilterCount(data.count);
+    } else {
+      btn.disabled = false;
+    }
+  } catch (_) {
+    btn.disabled = false;
+  }
+}
+
+/* Favorite every selected row into My Rules */
+async function addSelectedToFilter() {
+  const checkboxes = document.querySelectorAll('.row-select:checked');
+  if (!checkboxes.length) return;
+  const rules = Array.from(checkboxes).map(cb => ({
+    rule_id: cb.dataset.ruleId,
+    title:   cb.dataset.title,
+    source:  cb.dataset.source,
+  }));
+  try {
+    const resp = await fetch('/settings/rule-filter/add-bulk', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': _csrfToken},
+      body:    JSON.stringify({rules}),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      checkboxes.forEach(cb => {
+        const btn = cb.closest('tr')?.querySelector('.filter-btn');
+        if (btn) { btn.textContent = '✓'; btn.classList.add('filter-btn-active'); btn.disabled = true; }
+        cb.checked = false;
+      });
+      const selectAll = document.getElementById('select-all');
+      if (selectAll) selectAll.checked = false;
+      updateBulkBar();
+      updateFilterCount(data.count);
+    }
+  } catch (_) {}
+}
+
+/* Live-update the "My Rules" active-filter count banner, if present on this page */
+function updateFilterCount(n) {
+  const bar = document.querySelector('.rule-filter-bar');
+  if (!bar) {
+    location.reload();
+    return;
+  }
+  bar.innerHTML = bar.innerHTML.replace(/\d+ entr/, n + ' entr');
+}
 
 function toggleMobileNav() {
   const drawer = document.getElementById('nav-mobile-drawer');

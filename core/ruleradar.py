@@ -635,11 +635,13 @@ def clone_repo(repo_cfg: dict) -> bool:
 
     REPOS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Shallow clone with full working tree so we can read files directly from disk
+    # Shallow clone with full working tree so we can read files directly from disk.
+    # "--" terminates option parsing so a branch name starting with "-" (from a
+    # custom repo's admin-supplied branch field) can't be misread as a git flag.
     rc, out = git_run([
         "clone", "--depth=1", "--single-branch",
         "--branch", branch,
-        url, str(local),
+        "--", url, str(local),
     ])
 
     if rc != 0:
@@ -775,7 +777,10 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int]:
         return 0, 0, []
 
     print(f"  [{name}] Fetching updates…", flush=True)
-    rc, out = git_run(["fetch", "--depth=1", "origin", branch], cwd=str(local))
+    # "--" terminates option parsing -- branch is a bare positional refspec
+    # here (unlike clone's "--branch <value>"), so without it a branch name
+    # starting with "-" could be misread as a git flag instead of a ref.
+    rc, out = git_run(["fetch", "--depth=1", "origin", "--", branch], cwd=str(local))
     if rc != 0:
         msg = f"Fetch failed: {out[:300]}"
         print(f"  [{name}] {msg}", file=sys.stderr)
@@ -846,6 +851,13 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int]:
 
     def _in_scope(fp: str) -> bool:
         """Return True if fp is an in-scope rule file inside a monitored path."""
+        # Defense-in-depth: git's tree format shouldn't ever produce an
+        # absolute path or ".." segment here, but reject them explicitly
+        # anyway -- `local / fp` silently discards `local` if fp is
+        # absolute (a pathlib gotcha), which would resolve outside the
+        # cloned repo entirely instead of raising an error.
+        if fp.startswith(("/", "\\")) or any(seg == ".." for seg in fp.replace("\\", "/").split("/")):
+            return False
         if not any(fp.startswith(p) for p in paths):
             return False
         if parser == "elastic":
