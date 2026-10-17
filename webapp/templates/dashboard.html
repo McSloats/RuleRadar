@@ -1,11 +1,11 @@
 {% extends "layout.html" %}
+{% from "_page.html" import page_header %}
+{% from "_icons.html" import icon %}
 {% block title %}Dashboard — RuleRadar{% endblock %}
 
 {% block content %}
 
-<div class="page-header">
-  <h2>Dashboard</h2>
-</div>
+{{ page_header('Dashboard', 'Overview of your monitored repositories and recent rule activity.') }}
 
 {# ── Summary tiles: each number with its context ─────────────────────────── #}
 <div class="dash-tiles">
@@ -132,7 +132,11 @@
 
 {# ── Repository rows ──────────────────────────────────────────────────────── #}
 {% if repos %}
-<section class="dash-panel dash-repos" aria-label="Repositories">
+<section class="dash-panel dash-repos" aria-labelledby="dash-repos-title">
+  <div class="dash-panel-head dash-repos-head">
+    <h3 class="dash-panel-title" id="dash-repos-title">Repositories</h3>
+    <span class="dash-panel-hint">{{ repos | length }} monitored</span>
+  </div>
   <div class="dash-repo-row dash-repo-head" aria-hidden="true">
     <span>Repository</span>
     <span class="num">Rules</span>
@@ -207,14 +211,18 @@
 
 {% else %}
 <div class="empty-state">
+  <span class="empty-state-icon">{{ icon('box', 22) }}</span>
+  <h3>No repositories configured yet</h3>
   <p>
-    No repositories configured yet.<br>
     {% if current_user.is_admin %}
-      <a href="{{ url_for('setup_repos') }}">Set up repositories →</a>
+      Add a detection-rule repository and RuleRadar will clone it and start tracking changes.
     {% else %}
       Ask your administrator to configure a repository.
     {% endif %}
   </p>
+  {% if current_user.is_admin %}
+  <a class="btn btn-primary" href="{{ url_for('setup_repos') }}">Set up repositories</a>
+  {% endif %}
 </div>
 {% endif %}
 
@@ -299,11 +307,12 @@
 
 /* ── Panels (charts + repository list) ───────────────────────────────────── */
 .dash-insights [hidden] { display: none !important; }
+/* Same look as the shared .card / .card-title (layout.html) */
 .dash-panel {
   background: #160f2a;
   border: 1px solid #2b1e4a;
   border-radius: 8px;
-  padding: 1.1rem 1.25rem;
+  padding: 1.25rem;
   min-width: 0;
 }
 .dash-panel-head {
@@ -311,7 +320,9 @@
   align-items: center;
   gap: 0.6rem;
   flex-wrap: wrap;
-  margin-bottom: 0.9rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid #2b1e4a;
 }
 .dash-panel-title {
   font-size: 0.95rem;
@@ -560,7 +571,9 @@
 }
 
 /* ── Repository rows ─────────────────────────────────────────────────────── */
-.dash-repos { padding: 0.35rem 0; }
+.dash-repos { padding: 0 0 0.35rem; }
+.dash-repos-head { padding: 1rem 1.25rem 0.65rem; margin-bottom: 0; }
+.dash-repos .dash-repo-head { border-top: none; }
 .dash-repo-row {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) 80px 90px 110px 90px 90px 220px;

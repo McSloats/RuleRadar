@@ -1,0 +1,26 @@
+{% from "_icons.html" import icon %}
+{# Shared page header -- the same structure on every page:
+     {% call page_header('Title', 'One-line description', crumb=('Admin', url)) %}
+       ...optional action buttons...
+     {% endcall %}
+   or without actions: {{ page_header('Title', 'Description') }} #}
+{% macro page_header(title, subtitle='', crumb=None) -%}
+<div class="page-header">
+  <div class="page-heading">
+    {% if crumb %}<p class="page-crumb"><a href="{{ crumb[1] }}">{{ crumb[0] }}</a> /</p>{% endif %}
+    <h2>{{ title }}</h2>
+    {% if subtitle %}<p class="page-subtitle">{{ subtitle }}</p>{% endif %}
+  </div>
+  {% if caller is defined %}<div class="page-actions">{{ caller() }}</div>{% endif %}
+</div>
+{%- endmacro %}
+
+{# Shared empty state: icon, heading, message (may contain markup), optional action #}
+{% macro empty_state(icon_name, heading, message='', action=None) -%}
+<div class="empty-state">
+  <span class="empty-state-icon">{{ icon(icon_name, 22) }}</span>
+  <h3>{{ heading }}</h3>
+  {% if message %}<p>{{ message }}</p>{% endif %}
+  {% if action %}<a class="btn btn-primary" href="{{ action[1] }}">{{ action[0] }}</a>{% endif %}
+</div>
+{%- endmacro %}

@@ -1,30 +1,30 @@
 {% extends "layout.html" %}
+{% from "_page.html" import page_header %}
+{% from "_icons.html" import icon %}
 {% block title %}Settings — RuleRadar{% endblock %}
 
 {% block content %}
-<div class="settings-content-wrap">
-<div class="page-header">
-  <h2>Settings</h2>
-</div>
+{{ page_header('Settings', 'Your password, Discord notifications and saved filters.') }}
 
 {# ═══ Repositories & Scan Status ══════════════════════════════════════════════ #}
 <div class="card">
-  <div class="card-title">⏱ Repositories &amp; Scan Schedule</div>
+  <div class="card-title">{{ icon('clock') }} Repositories &amp; Scan Schedule</div>
 
   <div class="scan-status-grid">
 
     {# Last scan #}
     <div class="scan-stat-cell">
       <p class="scan-stat-label">Last Scan</p>
-      <p class="scan-stat-value">{{ last_scan_display }}</p>
+      <p class="scan-stat-value">{% if last_scan %}{{ last_scan | relative_time }}{% else %}No scan yet{% endif %}</p>
+      {% if last_scan %}<p class="text-muted text-small" style="margin-top:0.25rem;">{{ last_scan | format_dt }}</p>{% endif %}
     </div>
 
     {# Next scheduled scan #}
     <div class="scan-stat-cell">
       <p class="scan-stat-label">Next Scheduled Scan</p>
-      <p class="scan-stat-value">{{ next_scan_display }}</p>
+      <p class="scan-stat-value">{{ next_scan | format_dt }}</p>
       <p class="text-muted text-small" style="margin-top:0.25rem;">
-        Runs automatically every 2 hours at even UTC hours
+        Runs automatically every 2 hours
       </p>
     </div>
 
@@ -42,8 +42,8 @@
       <span class="repo-chip-name">{{ repo.display_name }}</span>
       <span class="repo-chip-status">{{ repo.status }}</span>
       {% if repo.last_synced_at %}
-        <span class="repo-chip-time">
-          synced {{ repo.last_synced_at | format_dt('%Y-%m-%d') }}
+        <span class="repo-chip-time" title="{{ repo.last_synced_at | format_dt }}">
+          synced {{ repo.last_synced_at | relative_time }}
         </span>
       {% endif %}
     </div>
@@ -72,9 +72,12 @@
 .repo-chip-error   .repo-chip-status { color: #fc8181; }
 </style>
 
+{# Password and Discord sit side by side on wide screens #}
+<div class="card-grid">
+
 {# ═══ Change Password ══════════════════════════════════════════════════════════ #}
 <div class="card">
-  <div class="card-title">🔒 Change Password</div>
+  <div class="card-title">{{ icon('lock') }} Change Password</div>
   <form method="post" action="{{ url_for('settings_password') }}" style="max-width:400px;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="form-group">
@@ -95,8 +98,8 @@
 
 {# ═══ Discord Notifications ════════════════════════════════════════════════════ #}
 <div class="card">
-  <div class="card-title">🔔 Discord Notifications</div>
-  <p class="text-muted text-small" style="margin-bottom:1rem;">
+  <div class="card-title">{{ icon('bell') }} Discord Notifications</div>
+  <p class="card-intro">
     When a scan detects new or modified rules, a summary is posted to your webhook.
     Each user can have their own channel.
   </p>
@@ -138,10 +141,12 @@
   {% endif %}
 </div>
 
+</div>{# /card-grid #}
+
 {# ═══ Saved Filters ════════════════════════════════════════════════════════════ #}
 <div class="card">
-  <div class="card-title">⚡ Saved Filters</div>
-  <p class="text-muted text-small" style="margin-bottom:1rem;">
+  <div class="card-title">{{ icon('zap') }} Saved Filters</div>
+  <p class="card-intro">
     Quick-access preset buttons that appear at the top of the Detections and Updates pages.
   </p>
 
@@ -256,9 +261,4 @@
   </form>
 </div>
 
-</div>{# /settings-content-wrap #}
-
-<style>
-.settings-content-wrap { max-width: 860px; margin: 0 auto; }
-</style>
 {% endblock %}

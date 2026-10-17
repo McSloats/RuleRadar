@@ -1,25 +1,21 @@
 {% extends "layout.html" %}
+{% from "_page.html" import page_header %}
+{% from "_icons.html" import icon %}
 {% block title %}Admin — RuleRadar{% endblock %}
 
 {% block content %}
-<div class="admin-content-wrap">
-<div class="page-header">
-  <h2>Administration</h2>
-  <div style="margin-left:auto; display:flex; gap:0.5rem;">
-    <form method="post" action="{{ url_for('admin_scan_now') }}" style="display:inline;">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="btn btn-secondary">🔄 Scan Now</button>
-    </form>
-    <a href="{{ url_for('admin_activity') }}" class="btn btn-secondary">
-      📋 Activity Log
-    </a>
-  </div>
-</div>
+{% call page_header('Administration', 'Monitored repositories, user accounts and application-wide settings.') %}
+  <form method="post" action="{{ url_for('admin_scan_now') }}" style="display:inline;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-secondary">{{ icon('refresh', 14) }}Scan Now</button>
+  </form>
+  <a href="{{ url_for('admin_activity') }}" class="btn btn-secondary">{{ icon('list', 14) }}Activity Log</a>
+{% endcall %}
 
 {# ═══ Monitored Repositories ══════════════════════════════════════════════════ #}
 <div class="card">
-  <div class="card-title">📦 Monitored Repositories</div>
-  <p class="text-muted text-small" style="margin-bottom:1rem;">
+  <div class="card-title">{{ icon('box') }} Monitored Repositories</div>
+  <p class="card-intro">
     Repositories are cloned locally with <code style="background:#0a0716; padding:0.1rem 0.3rem; border-radius:3px; font-size:0.78rem; color:#c4b5fd;">git clone</code>
     and kept up to date via <code style="background:#0a0716; padding:0.1rem 0.3rem; border-radius:3px; font-size:0.78rem; color:#c4b5fd;">git fetch</code>
     every two hours.  No API rate limits apply.
@@ -61,7 +57,7 @@
           <td class="text-muted text-small">{{ repo.parser }}</td>
           <td class="text-muted text-small nowrap">
             {% if repo.last_synced_at %}
-              {{ repo.last_synced_at[:16].replace('T',' ') }} UTC
+              {{ repo.last_synced_at | format_dt }}
             {% else %}
               —
             {% endif %}
@@ -74,7 +70,7 @@
                     action="{{ url_for('admin_repos_toggle', name=repo.name) }}"
                     style="display:inline;">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="btn btn-secondary btn-sm">
+                <button type="submit" class="btn btn-outline btn-sm">
                   {{ 'Enable' if not repo.enabled else 'Disable' }}
                 </button>
               </form>
@@ -128,7 +124,7 @@
     <form method="post" action="{{ url_for('admin_repos_add') }}" style="display:inline;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="name" value="{{ cfg.name }}">
-      <button type="submit" class="btn btn-secondary btn-sm">
+      <button type="submit" class="btn btn-outline btn-sm">
         + {{ cfg.display_name }}
       </button>
     </form>
@@ -198,7 +194,7 @@
 
 {# ═══ User Management ══════════════════════════════════════════════════════════ #}
 <div class="card">
-  <div class="card-title">👥 Users</div>
+  <div class="card-title">{{ icon('users') }} Users</div>
 
   <div class="table-wrap" style="margin-bottom:1.5rem;">
     <table class="static-table">
@@ -244,14 +240,14 @@
                     style="display:inline;"
                     onsubmit="return confirm('Change admin status for {{ user.username }}?');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="btn btn-secondary btn-sm">
+                <button type="submit" class="btn btn-outline btn-sm">
                   {{ 'Revoke admin' if user.is_admin else 'Make admin' }}
                 </button>
               </form>
               {% endif %}
 
               <details class="inline-action">
-                <summary class="btn btn-secondary btn-sm" style="cursor:pointer;">Reset password</summary>
+                <summary class="btn btn-outline btn-sm" style="cursor:pointer;">Reset password</summary>
                 <div class="detail-body">
                   <form method="post"
                         action="{{ url_for('admin_reset_password', user_id=user.id) }}">
@@ -323,8 +319,8 @@
 
 {# ═══ Application Settings ════════════════════════════════════════════════════ #}
 <div class="card">
-  <div class="card-title">⚙️ Application Settings</div>
-  <p class="text-muted text-small" style="margin-bottom:1rem;">
+  <div class="card-title">{{ icon('settings') }} Application Settings</div>
+  <p class="card-intro">
     Global settings that apply to all users.
   </p>
 

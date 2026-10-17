@@ -581,6 +581,9 @@ def _relative_time(ts_iso: str) -> str:
         return ts_iso[:16].replace("T", " ") + " UTC"
 
 
+app.jinja_env.filters["relative_time"] = _relative_time
+
+
 def _change_activity(days: int = 90) -> dict:
     """
     Daily rule-change counts for the dashboard activity chart, bucketed by
@@ -849,6 +852,7 @@ def my_rules():
         rows, _ = db.search_detections(user_filter_rows=filters, per_page=500)
         for row in rows:
             row["_filter_id"] = filter_id_by_rule_id.get(row.get("rule_id"))
+        _attach_change_counts(rows)
 
     return render_template(
         "my_rules.html",
@@ -983,16 +987,11 @@ def settings():
     except (json.JSONDecodeError, TypeError):
         saved_filters = []
 
-    # Scan schedule
-    tz                = _get_display_tz()
-    tz_name           = db.get_app_setting("timezone", "UTC")
-    status            = db.get_scan_status()
-    last_scan         = status.get("last_scan")
-    last_scan_display = (
-        _format_dt(last_scan, "%Y-%m-%d %H:%M") + f" {tz_name}" if last_scan else "No scan yet"
-    )
-    next_scan_dt      = _next_scheduled_scan().astimezone(tz)
-    next_scan_display = next_scan_dt.strftime("%Y-%m-%d %H:%M") + f" {tz_name}"
+    # Scan schedule -- raw UTC ISO strings; the template formats them with
+    # format_dt / relative_time like every other page
+    status    = db.get_scan_status()
+    last_scan = status.get("last_scan") or ""
+    next_scan = _next_scheduled_scan().strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # Active repos for the status card
     repos = db.get_all_repos()
@@ -1001,8 +1000,8 @@ def settings():
         "settings.html",
         user_settings=user_settings,
         saved_filters=saved_filters,
-        last_scan_display=last_scan_display,
-        next_scan_display=next_scan_display,
+        last_scan=last_scan,
+        next_scan=next_scan,
         repos=repos,
     )
 
