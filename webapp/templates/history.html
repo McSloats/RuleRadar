@@ -1,12 +1,12 @@
 {% extends "layout.html" %}
 {% from "_diff_macro.html" import diff_block %}
+{% from "_page.html" import page_header, empty_state %}
+{% from "_icons.html" import icon %}
 {% block title %}History — RuleRadar{% endblock %}
 
 {% block content %}
 
-<div class="page-header">
-  <h2>History</h2>
-</div>
+{{ page_header('History', 'Pick a rule to see every recorded change to it, newest first.') }}
 
 {# ── Rule picker ── #}
 <form method="get" action="{{ url_for('history') }}" class="filter-bar">
@@ -25,121 +25,292 @@
 
 {% if source and file_path %}
 
-  {# ── Selected rule: full file ── #}
-  <div class="card" style="margin-top:1.25rem;">
-    <div class="card-title">
-      {{ selected.title if selected else file_path.split('/')[-1] }}
-      <span class="badge badge-{{ source }}" style="margin-left:0.5rem;">{{ source }}</span>
+  {% set rule_title = selected.title if selected else (events[0].title if events else file_path.split('/')[-1]) %}
+  {% set rule_url = selected.rule_url if selected else (events[0].rule_url if events else '') %}
+  {% set last_changed = events[0].detected_at if events else (selected.last_updated if selected else '') %}
+
+  {# ── Summary: what the rule is and how active it has been ── #}
+  <section class="card hist-summary" aria-labelledby="hist-rule-title">
+    <div class="hist-summary-head">
+      <div class="hist-summary-id">
+        <h3 class="hist-rule-title" id="hist-rule-title">{{ rule_title }}</h3>
+        <p class="hist-rule-path">
+          <span class="badge {% if source in ['sigma', 'splunk', 'elastic', 'panther', 'sublime', 'anvilogic'] %}badge-{{ source }}{% else %}badge-system{% endif %}">{{ source }}</span>
+          <code>{{ file_path }}</code>
+        </p>
+      </div>
+      <div class="page-actions">
+        {% if selected %}
+        <a class="btn btn-outline btn-sm" href="{{ url_for('detections', title=rule_title, source=source) }}">{{ icon('search', 14) }}Open in Detections</a>
+        {% endif %}
+        {% if rule_url %}
+        <a class="btn btn-outline btn-sm" href="{{ rule_url }}" target="_blank" rel="noopener">GitHub ↗</a>
+        {% endif %}
+      </div>
     </div>
-    <p class="text-muted text-small" style="margin-bottom:0.5rem;">{{ file_path }}</p>
+
     {% if not selected %}
-      <p class="text-muted text-small" style="margin-bottom:0.75rem;">
-        This rule is no longer in the monitored repository — showing its modification history below.
-      </p>
-    {% elif selected.rule_url %}
-      <a href="{{ selected.rule_url }}" target="_blank" rel="noopener"
-         class="text-small" style="margin-bottom:0.5rem; display:inline-block;">GitHub ↗</a>
+    <p class="hist-note">This rule is no longer in the monitored repository — its recorded history is shown below.</p>
     {% endif %}
 
-    <p class="detail-label" style="margin-top:0.5rem;">Full File</p>
-    {% if selected and selected.raw_content %}
-      <pre class="detail-raw" style="max-height:600px;">{{ selected.raw_content }}</pre>
-    {% else %}
-      <p class="detail-text text-muted">No file content available.</p>
-    {% endif %}
-  </div>
+    <dl class="hist-stats">
+      <div><dt>Recorded changes</dt><dd>{{ events | length }}</dd></div>
+      <div><dt>Modifications</dt><dd>{{ mod_count }}</dd></div>
+      <div>
+        <dt>Last changed</dt>
+        <dd>{% if last_changed %}{{ last_changed | relative_time }}<span>{{ last_changed | format_dt }}</span>{% else %}—{% endif %}</dd>
+      </div>
+      <div>
+        <dt>Tracked since</dt>
+        <dd>{% if selected and selected.first_seen %}{{ selected.first_seen | relative_time }}<span>{{ selected.first_seen | format_dt }}</span>{% else %}—{% endif %}</dd>
+      </div>
+    </dl>
 
-  {# ── Last 5 modifications ── #}
-  <div class="card" style="margin-top:1.25rem;">
-    <div class="card-title">
-      Last {{ recent_mods | length }} Modification{{ 's' if recent_mods | length != 1 else '' }}
-    </div>
-    {% if recent_mods %}
-      {% for m in recent_mods %}
-        <div class="history-entry{% if not loop.last %} history-entry-divider{% endif %}">
-          <p class="detail-label" style="margin-top:0;">{{ m.detected_at | format_dt }}</p>
-          {{ diff_block(m.diff_text, m.diff_added, m.diff_removed) }}
-        </div>
+    {% if selected and selected.mitre_techniques %}
+    <div class="hist-mitre">
+      <span class="detail-label">MITRE</span>
+      {% for tech in selected.mitre_techniques.split('|') %}
+        <a href="{{ url_for('detections', mitre=tech) }}" class="badge badge-mitre">{{ tech }}</a>
       {% endfor %}
-    {% else %}
-      <p class="detail-text text-muted">No modification history yet for this rule.</p>
+    </div>
     {% endif %}
-  </div>
+  </section>
+
+  {# ── Timeline (left) + the selected change (right) ── #}
+  <section class="card" aria-labelledby="hist-timeline-title">
+    <div class="card-title" id="hist-timeline-title">
+      {{ icon('clock') }} Change timeline
+      <span class="card-title-aside">{{ events | length }} event{{ 's' if events | length != 1 else '' }}</span>
+    </div>
+    {% if events %}
+    <div class="hist-layout">
+      <ol class="hist-timeline" role="tablist" aria-label="Recorded changes" aria-orientation="vertical">
+        {% for e in events %}
+        <li>
+          <button type="button" role="tab" id="hist-tab-{{ loop.index }}"
+                  class="hist-event{% if loop.first %} is-active{% endif %}"
+                  aria-selected="{{ 'true' if loop.first else 'false' }}"
+                  aria-controls="hist-panel-{{ loop.index }}"
+                  tabindex="{{ '0' if loop.first else '-1' }}">
+            <span class="hist-dot hist-dot-{{ e.change_type }}"></span>
+            <span class="hist-event-main">
+              <span class="badge badge-{{ e.change_type }}">{{ e.change_type }}</span>
+              <span class="hist-event-date">{{ e.detected_at | format_dt }}</span>
+            </span>
+            <span class="hist-event-meta">
+              {% if e.diff_text %}<span class="diff-added">+{{ e.diff_added }}</span> <span class="diff-removed">&minus;{{ e.diff_removed }}</span> · {% endif %}{{ e.detected_at | relative_time }}
+            </span>
+          </button>
+        </li>
+        {% endfor %}
+      </ol>
+
+      <div class="hist-detail">
+        {% for e in events %}
+        <div class="hist-panel" id="hist-panel-{{ loop.index }}" role="tabpanel"
+             aria-labelledby="hist-tab-{{ loop.index }}" {% if not loop.first %}hidden{% endif %}>
+          <p class="hist-panel-head">
+            <span class="badge badge-{{ e.change_type }}">{{ e.change_type }}</span>
+            {{ e.detected_at | format_dt }}
+            {% if e.title and e.title != rule_title %}<span class="text-muted">· recorded as “{{ e.title }}”</span>{% endif %}
+          </p>
+          {% if e.change_type == 'new' %}
+            <p class="hist-panel-note">The rule first appeared in this scan. There's no earlier version to compare against.</p>
+          {% elif e.diff_text %}
+            {{ diff_block(e.diff_text, e.diff_added, e.diff_removed) }}
+          {% else %}
+            <p class="hist-panel-note">No diff was recorded for this change.</p>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% else %}
+      {{ empty_state('clock', 'No recorded changes yet', "A change is recorded each time a scan sees this rule added, modified, renamed or deleted.") }}
+    {% endif %}
+  </section>
+
+  {# ── Current file, out of the way until asked for ── #}
+  {% if selected and selected.raw_content %}
+  <details class="card hist-file">
+    <summary class="card-title">
+      {{ icon('file') }} Current file
+      <span class="card-title-aside hist-file-hint">Show</span>
+    </summary>
+    <pre class="detail-raw">{{ selected.raw_content }}</pre>
+  </details>
+  {% endif %}
 
 {% elif q %}
 
   {# ── Search results ── #}
-  <div class="card" style="margin-top:1.25rem;">
-    <div class="card-title">Results</div>
-    {% if results %}
-      <div class="table-wrap">
-        <table class="static-table">
-          <thead>
-            <tr>
-              <th>Title</th>
-              <th style="width:90px;">Source</th>
-              <th>Path</th>
-              <th style="width:110px;">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for r in results %}
-            <tr>
-              <td>{{ r.title }}</td>
-              <td><span class="badge badge-{{ r.source }}">{{ r.source }}</span></td>
-              <td class="text-muted text-small">{{ r.file_path }}</td>
-              <td>
-                <a class="btn btn-sm btn-secondary"
-                   href="{{ url_for('history', source=r.source, file_path=r.file_path) }}">View</a>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    {% else %}
-      <p class="text-muted" style="margin-top:0.5rem;">No rules matched "{{ q }}".</p>
-    {% endif %}
+  {% if results %}
+  <p class="result-count">{{ "{:,}".format(results | length) }} rule{{ 's' if results | length != 1 else '' }} matching <strong>{{ q }}</strong></p>
+  <div class="card card-flush">
+    <div class="table-wrap">
+      <table class="static-table">
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th style="width:110px;">Source</th>
+            <th>Path</th>
+            <th style="width:110px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in results %}
+          <tr>
+            <td><strong>{{ r.title }}</strong></td>
+            <td><span class="badge badge-{{ r.source }}">{{ r.source }}</span></td>
+            <td class="text-muted text-small">{{ r.file_path }}</td>
+            <td><a class="text-small" href="{{ url_for('history', source=r.source, file_path=r.file_path) }}">History</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
+  {% else %}
+    {{ empty_state('search', 'Nothing matches', 'No rules have a title matching “' ~ q ~ '”.') }}
+  {% endif %}
 
 {% else %}
 
   {# ── Default: most recent rule changes from the Updates feed ── #}
-  <div class="card" style="margin-top:1.25rem;">
-    <div class="card-title">Recent Changes</div>
+  <div class="card card-flush">
+    <div class="card-title">
+      {{ icon('refresh') }} Recent changes
+      <a class="card-title-aside" href="{{ url_for('updates') }}">View all in Updates →</a>
+    </div>
     {% if recent_changes %}
-      <div class="table-wrap">
-        <table class="static-table">
-          <thead>
-            <tr>
-              <th>Title</th>
-              <th style="width:90px;">Source</th>
-              <th style="width:100px;">Change</th>
-              <th style="width:150px;">Detected</th>
-              <th style="width:110px;">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for c in recent_changes %}
-            <tr>
-              <td>{{ c.title or c.file_path.split('/')[-1] }}</td>
-              <td><span class="badge badge-{{ c.source }}">{{ c.source }}</span></td>
-              <td><span class="badge badge-{{ c.change_type }}">{{ c.change_type }}</span></td>
-              <td class="nowrap text-muted text-small">{{ c.detected_at | format_dt }}</td>
-              <td>
-                <a class="btn btn-sm btn-secondary"
-                   href="{{ url_for('history', source=c.source, file_path=c.file_path) }}">View</a>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
+    <div class="table-wrap">
+      <table class="static-table">
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th style="width:110px;">Source</th>
+            <th style="width:110px;">Change</th>
+            <th style="width:150px;">Detected</th>
+            <th style="width:110px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in recent_changes %}
+          <tr>
+            <td><strong>{{ c.title or c.file_path.split('/')[-1] }}</strong></td>
+            <td><span class="badge badge-{{ c.source }}">{{ c.source }}</span></td>
+            <td><span class="badge badge-{{ c.change_type }}">{{ c.change_type }}</span></td>
+            <td class="nowrap text-muted text-small">{{ c.detected_at | format_dt }}</td>
+            <td><a class="text-small" href="{{ url_for('history', source=c.source, file_path=c.file_path) }}">History</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
     {% else %}
-      <p class="text-muted" style="margin-top:0.5rem;">No rule changes recorded yet.</p>
+      {{ empty_state('inbox', 'No rule changes recorded yet', 'Changes appear here after a scan sees rules added, modified, renamed or deleted.') }}
     {% endif %}
   </div>
 
 {% endif %}
+
+<style>
+/* ── Rule summary ── */
+.hist-summary-head { display: flex; gap: 1rem; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; }
+.hist-summary-id { min-width: 0; flex: 1 1 360px; }
+.hist-rule-title { font-size: 1.05rem; font-weight: 600; color: #ede8f5; margin: 0 0 0.4rem; line-height: 1.35; }
+.hist-rule-path { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin: 0; }
+.hist-rule-path code { font-size: 0.76rem; color: #9080b8; word-break: break-all; }
+.hist-note { font-size: 0.8rem; color: #fcd34d; margin: 0.9rem 0 0; }
+.hist-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+  margin: 1.1rem 0 0;
+}
+.hist-stats > div { background: #0d0820; border: 1px solid #2b1e4a; border-radius: 6px; padding: 0.6rem 0.8rem; }
+.hist-stats dt { font-size: 0.66rem; color: #6a5888; text-transform: uppercase; letter-spacing: 0.05em; }
+.hist-stats dd { margin: 0.2rem 0 0; font-size: 1.05rem; font-weight: 700; color: #ede8f5; }
+.hist-stats dd span { display: block; font-size: 0.72rem; font-weight: 400; color: #9080b8; margin-top: 0.1rem; }
+.hist-mitre { display: flex; align-items: center; flex-wrap: wrap; gap: 0.15rem; margin-top: 0.9rem; }
+
+/* ── Timeline + selected change ── */
+.hist-layout { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 1.25rem; }
+@media (max-width: 900px) { .hist-layout { grid-template-columns: 1fr; } }
+.hist-timeline { list-style: none; margin: 0; padding: 0; position: relative; max-height: 520px; overflow-y: auto; }
+/* The vertical line the dots sit on */
+.hist-timeline::before { content: ""; position: absolute; left: 13px; top: 10px; bottom: 10px; width: 1px; background: #2b1e4a; }
+.hist-event {
+  position: relative;
+  display: grid;
+  grid-template-columns: 12px 1fr;
+  gap: 0.15rem 0.7rem;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0.55rem 0.6rem 0.55rem 0.5rem;
+  margin-bottom: 0.2rem;
+  font: inherit;
+  color: #c8bfe0;
+  cursor: pointer;
+}
+.hist-event:hover { background: #1e1438; }
+.hist-event.is-active { background: #2b1e4a; border-color: #3d2b66; }
+.hist-event:focus-visible { outline: 1px solid #d4a017; outline-offset: 1px; }
+.hist-dot { grid-row: 1 / 3; width: 10px; height: 10px; border-radius: 50%; margin-top: 0.3rem; border: 2px solid #160f2a; position: relative; z-index: 1; }
+.hist-dot-new      { background: #199e70; }
+.hist-dot-modified { background: #c98500; }
+.hist-dot-renamed  { background: #9085e9; }
+.hist-dot-deleted  { background: #e66767; }
+.hist-event-main { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
+.hist-event-date { font-size: 0.8rem; color: #ede8f5; font-variant-numeric: tabular-nums; }
+.hist-event-meta { font-size: 0.72rem; color: #6a5888; }
+.hist-event-meta .diff-added { color: #6ee7b7; font-weight: 600; }
+.hist-event-meta .diff-removed { color: #fca5a5; font-weight: 600; }
+.hist-detail { min-width: 0; }
+.hist-panel-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; font-size: 0.82rem; color: #c8bfe0; margin: 0 0 0.75rem; }
+.hist-panel-note { font-size: 0.85rem; color: #9080b8; background: #0d0820; border: 1px dashed #2b1e4a; border-radius: 6px; padding: 1rem; }
+
+/* ── Current file toggle ── */
+.hist-file > summary { cursor: pointer; list-style: none; margin-bottom: 0; border-bottom: none; padding-bottom: 0; }
+.hist-file > summary::-webkit-details-marker { display: none; }
+.hist-file[open] > summary { margin-bottom: 1rem; padding-bottom: 0.65rem; border-bottom: 1px solid #2b1e4a; }
+.hist-file > summary:hover .hist-file-hint { color: #d4a017; }
+.hist-file pre.detail-raw { max-height: 600px; margin: 0; }
+</style>
+
+<script>
+/* Timeline tabs: click or arrow keys pick which change's diff is shown */
+(function () {
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.hist-event'));
+  if (!tabs.length) return;
+  function pick(tab, focus) {
+    tabs.forEach(function (t) {
+      var on = t === tab;
+      t.classList.toggle('is-active', on);
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+      t.tabIndex = on ? 0 : -1;
+      document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+    });
+    if (focus) tab.focus();
+  }
+  tabs.forEach(function (t, i) {
+    t.addEventListener('click', function () { pick(t); });
+    t.addEventListener('keydown', function (e) {
+      var next = e.key === 'ArrowDown' ? i + 1 : e.key === 'ArrowUp' ? i - 1 : null;
+      if (next === null) return;
+      e.preventDefault();
+      pick(tabs[(next + tabs.length) % tabs.length], true);
+    });
+  });
+  // Show/Hide label on the current-file toggle
+  var file = document.querySelector('.hist-file');
+  if (file) file.addEventListener('toggle', function () {
+    file.querySelector('.hist-file-hint').textContent = file.open ? 'Hide' : 'Show';
+  });
+})();
+</script>
 
 {% endblock %}

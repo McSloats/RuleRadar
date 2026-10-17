@@ -774,23 +774,28 @@ def updates():
 @login_required
 def history():
     """
-    Pick a rule and see its full current file plus its last 5 modifications
-    (date + diff each), reusing the diff machinery from the Updates page.
-    With no rule or search, lists the 5 most recent rule changes instead.
+    Pick a rule and see a summary, a timeline of every recorded change
+    (each with its diff, reusing the Updates page's diff machinery) and the
+    current file behind a toggle. With no rule or search, lists the 5 most
+    recent rule changes instead.
     """
     source    = request.args.get("source",    "").strip()
     file_path = request.args.get("file_path", "").strip()
     q         = request.args.get("q",         "").strip()
 
-    selected    = None
-    recent_mods = []
+    selected  = None
+    events    = []
+    mod_count = 0
     if source and file_path:
         selected = db.get_detection(source, file_path)
-        recent_mods = db.get_rule_updates(source, file_path, change_type="modified", limit=5)
-        for m in recent_mods:
-            if m.get("diff_text"):
-                added, removed = ruleradar.diff_stats(m["diff_text"])
-                m["diff_added"], m["diff_removed"] = added, removed
+        # Every recorded event for the rule (new/modified/renamed/deleted),
+        # newest first, for the timeline
+        events = db.get_rule_updates(source, file_path, limit=50)
+        for e in events:
+            if e.get("diff_text"):
+                added, removed = ruleradar.diff_stats(e["diff_text"])
+                e["diff_added"], e["diff_removed"] = added, removed
+        mod_count = db.count_rule_modifications([(source, file_path)]).get((source, file_path), 0)
 
     results = []
     if q and not (source and file_path):
@@ -803,7 +808,7 @@ def history():
     return render_template(
         "history.html",
         source=source, file_path=file_path, q=q,
-        selected=selected, recent_mods=recent_mods, results=results,
+        selected=selected, events=events, mod_count=mod_count, results=results,
         recent_changes=recent_changes,
     )
 
