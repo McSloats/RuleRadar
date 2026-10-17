@@ -339,13 +339,19 @@
     </div>
     <button type="submit" class="btn btn-primary">Save Timezone</button>
   </form>
+
+  <hr class="divider">
+  <div class="form-group" style="margin-bottom:0;">
+    <label>Change history kept per rule</label>
+    <p style="font-size:0.9rem; color:#ede8f5; margin:0.1rem 0 0;">
+      Newest {{ "{:,}".format(max_events_per_rule) }} changes
+    </p>
+    <p class="hint">Chosen during initial setup. Older changes for a rule are deleted automatically after each scan.</p>
+  </div>
 </div>
 
 
-</div>{# /admin-content-wrap #}
-
 <style>
-.admin-content-wrap { max-width: 860px; margin: 0 auto; }
 /* ── Repo status badges ─────────────────────────────────────────────────── */
 .badge-repo-pending   { background: #2b1e4a; color: #c4b5fd; }
 .badge-repo-cloning   { background: #251840; color: #c4b5fd; }

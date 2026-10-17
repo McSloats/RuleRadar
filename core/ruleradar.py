@@ -84,6 +84,8 @@ AVAILABLE_REPOS: dict[str, dict] = {
         "name":         "sigma",
         "display_name": "SigmaHQ / sigma",
         "description":  "Community Sigma detection rules for SIEM platforms (4,000+ rules)",
+        "approx_rules":   3800,   # rule count, for the /setup-repos storage estimate
+        "approx_disk_mb": 60,   # local clone size in MB (measured Oct 2026)
         "owner":        "SigmaHQ",
         "repo":         "sigma",
         "branch":       "master",
@@ -99,6 +101,8 @@ AVAILABLE_REPOS: dict[str, dict] = {
         "name":         "splunk",
         "display_name": "splunk / security_content",
         "description":  "Splunk's official security content and detection rules (1,000+ detections)",
+        "approx_rules":   2200,   # rule count, for the /setup-repos storage estimate
+        "approx_disk_mb": 70,   # local clone size in MB (measured Oct 2026)
         "owner":        "splunk",
         "repo":         "security_content",
         "branch":       "develop",
@@ -109,6 +113,8 @@ AVAILABLE_REPOS: dict[str, dict] = {
         "name":         "elastic",
         "display_name": "Elastic / detection-rules",
         "description":  "Elastic Security detection rules in EQL, KQL, and ES|QL (1,000+ rules)",
+        "approx_rules":   2300,   # rule count, for the /setup-repos storage estimate
+        "approx_disk_mb": 160,   # local clone size in MB (measured Oct 2026)
         "owner":        "elastic",
         "repo":         "detection-rules",
         "branch":       "main",
@@ -119,6 +125,8 @@ AVAILABLE_REPOS: dict[str, dict] = {
         "name":         "panther",
         "display_name": "Panther Labs / panther-analysis",
         "description":  "Panther community detection rules for cloud and SaaS platforms (1,000+ rules)",
+        "approx_rules":   900,   # rule count, for the /setup-repos storage estimate
+        "approx_disk_mb": 20,   # local clone size in MB (measured Oct 2026)
         "owner":        "panther-labs",
         "repo":         "panther-analysis",
         "branch":       "develop",
@@ -129,6 +137,8 @@ AVAILABLE_REPOS: dict[str, dict] = {
         "name":         "sublime",
         "display_name": "Sublime Security / sublime-rules",
         "description":  "Sublime Security email detection rules in MQL (600+ rules)",
+        "approx_rules":   1350,   # rule count, for the /setup-repos storage estimate
+        "approx_disk_mb": 10,   # local clone size in MB (measured Oct 2026)
         "owner":        "sublime-security",
         "repo":         "sublime-rules",
         "branch":       "main",
@@ -139,6 +149,8 @@ AVAILABLE_REPOS: dict[str, dict] = {
         "name":         "anvilogic",
         "display_name": "Anvilogic / armory",
         "description":  "Anvilogic Armory detection rules for Splunk and Snowflake (1,000+ detections)",
+        "approx_rules":   1900,   # rule count, for the /setup-repos storage estimate
+        "approx_disk_mb": 10,   # local clone size in MB (measured Oct 2026)
         "owner":        "anvilogic-forge",
         "repo":         "armory",
         "branch":       "main",
@@ -1117,7 +1129,15 @@ def run_scan(triggered_by: str = "scheduler") -> dict:
             except Exception as e:
                 print(f"  [{repo_cfg['name']}] Releases fetch error: {e}", file=sys.stderr)
 
-        summary_str = " | ".join(repo_summary)
+        # Keep at most the configured number of change events per rule
+        pruned = db.prune_rule_updates()
+        if pruned:
+            print(f"  Pruned {pruned} old change event(s) beyond "
+                  f"{db.get_max_events_per_rule()} per rule", flush=True)
+
+        # Pruning note goes in the log summary only, not the Discord message
+        # (which is built from repo_summary below)
+        summary_str = " | ".join(repo_summary + ([f"pruned {pruned} old change events"] if pruned else []))
         print(f"  Summary: {summary_str}", flush=True)
         print("Done.", flush=True)
 

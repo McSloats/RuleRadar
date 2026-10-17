@@ -65,6 +65,35 @@
         {% endfor %}
       </div>
 
+      {# ── Change-history retention ─────────────────────────────────────── #}
+      <p class="section-label" id="retention-label">How many changes to keep per rule:</p>
+      <p class="section-hint">
+        Each time a scan sees a rule change, RuleRadar stores that change and its diff
+        for the History page. Once a rule passes this limit, its oldest changes are
+        deleted automatically. Estimates are for the repositories ticked above
+        (about <strong id="est-rules">—</strong> rules).
+      </p>
+      <div class="retention-options" role="radiogroup" aria-labelledby="retention-label">
+        {% for n in history_choices %}
+        <label class="retention-option">
+          <input type="radio" name="max_events" value="{{ n }}" {% if n == history_default %}checked{% endif %}>
+          <span class="retention-head">
+            <strong>{{ "{:,}".format(n) }} changes</strong>
+            {% if n == history_default %}<span class="badge badge-new">Default</span>{% endif %}
+          </span>
+          <span class="retention-row"><span>History, worst case</span><strong data-est="hist" data-n="{{ n }}">—</strong></span>
+          <span class="retention-row"><span>Free disk to have</span><strong data-est="disk" data-n="{{ n }}">—</strong></span>
+        </label>
+        {% endfor %}
+      </div>
+      <p class="section-hint" style="margin-bottom:1.25rem;">
+        "Worst case" assumes every rule is modified up to the limit. In practice a rule
+        changes about once a year, so history grows by roughly <strong id="est-typical">—</strong>
+        a year whichever you pick; the limit only caps how large it can get.
+        "Free disk" covers the repository clones and rule database
+        (about <strong id="est-base">—</strong>), the worst-case history, and 25% headroom.
+      </p>
+
       <div class="confirm-note">
         <p>
           Cloning runs in the background and may take <strong>2–5 minutes</strong>
@@ -86,6 +115,36 @@
 </div>
 
 <script>
+// ── Change-history storage estimate ────────────────────────────────────────────
+(function () {
+  const M = {{ storage_model | tojson }};
+  const boxes = document.querySelectorAll('input[name="repos"]');
+  if (!boxes.length) return;
+  function size(bytes) {
+    const mb = bytes / 1048576;
+    if (mb < 1000) return Math.max(1, Math.round(mb)) + ' MB';
+    const gb = mb / 1024;
+    return (gb < 100 ? gb.toFixed(1) : Math.round(gb)) + ' GB';
+  }
+  function update() {
+    let rules = 0, cloneMb = 0;
+    boxes.forEach(b => {
+      const r = M.repos[b.value];
+      if (b.checked && r) { rules += r.rules; cloneMb += r.mb; }
+    });
+    const base = cloneMb * 1048576 + rules * M.db_bytes_per_rule;
+    document.getElementById('est-rules').textContent = rules.toLocaleString();
+    document.getElementById('est-base').textContent = size(base);
+    document.getElementById('est-typical').textContent = size(rules * M.mods_per_rule_year * M.bytes_per_event);
+    document.querySelectorAll('[data-est]').forEach(el => {
+      const hist = rules * Number(el.dataset.n) * M.bytes_per_event;
+      el.textContent = el.dataset.est === 'hist' ? size(hist) : size((base + hist) * M.headroom);
+    });
+  }
+  boxes.forEach(b => b.addEventListener('change', update));
+  update();
+})();
+
 // ── Fetch size estimates via AJAX ──────────────────────────────────────────────
 (async function loadSizes() {
   try {
@@ -241,6 +300,52 @@
   font-style: italic;
   font-size: 0.75rem;
 }
+
+/* ── Change-history retention ──────────────────────────────────────────── */
+.section-hint { font-size: 0.8rem; color: #9080b8; line-height: 1.55; margin: -0.4rem 0 0.85rem; }
+.section-hint strong { color: #ede8f5; }
+.retention-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 0.85rem;
+}
+@media (max-width: 560px) { .retention-options { grid-template-columns: 1fr; } }
+.retention-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 0.6rem;
+  align-items: center;
+  background: #0a0716;
+  border: 1px solid #2b1e4a;
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.retention-option:hover { border-color: #6a5888; }
+.retention-option:has(input:checked) { border-color: #d4a017; background: #140d26; }
+/* Themed radio, matching the app's custom checkboxes */
+.retention-option input {
+  appearance: none; -webkit-appearance: none;
+  width: 16px; height: 16px; margin: 0; cursor: pointer;
+  border: 1.5px solid #4a3a73; border-radius: 50%; background: #0a0716;
+  display: grid; place-content: center;
+}
+.retention-option input::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #d4a017; transform: scale(0); transition: transform 0.12s; }
+.retention-option input:checked { border-color: #d4a017; }
+.retention-option input:checked::after { transform: scale(1); }
+.retention-option input:focus-visible { outline: 1px solid #d4a017; outline-offset: 2px; }
+.retention-head { display: flex; align-items: center; gap: 0.5rem; color: #ede8f5; font-size: 0.9rem; }
+.retention-row {
+  grid-column: 2;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.78rem;
+  color: #9080b8;
+}
+.retention-row strong { color: #ede8f5; font-variant-numeric: tabular-nums; }
 
 /* ── Confirm note ──────────────────────────────────────────────────────── */
 .confirm-note {

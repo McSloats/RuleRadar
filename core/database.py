@@ -1307,6 +1307,43 @@ def log_activity(
 
 
 
+# Most change events kept per rule (source + file_path); older ones are pruned
+# after every scan so the updates table can't grow without bound. Chosen by
+# the installer on /setup-repos and stored in app_settings.
+DEFAULT_MAX_EVENTS_PER_RULE = 50
+MAX_EVENTS_CHOICES          = (50, 100, 1000, 10000)
+
+
+def get_max_events_per_rule() -> int:
+    """The configured per-rule change-history limit (default 50)."""
+    try:
+        value = int(get_app_setting("max_events_per_rule", str(DEFAULT_MAX_EVENTS_PER_RULE)))
+    except ValueError:
+        return DEFAULT_MAX_EVENTS_PER_RULE
+    return value if value > 0 else DEFAULT_MAX_EVENTS_PER_RULE
+
+
+def prune_rule_updates(keep: int | None = None) -> int:
+    """Delete all but the newest `keep` (default: the configured limit)
+    change events for each rule file. Returns how many rows were removed."""
+    if keep is None:
+        keep = get_max_events_per_rule()
+    with get_conn() as conn:
+        cur = conn.execute(
+            """DELETE FROM updates WHERE id IN (
+                   SELECT id FROM (
+                       SELECT id, ROW_NUMBER() OVER (
+                           PARTITION BY source, file_path
+                           ORDER BY detected_at DESC, id DESC
+                       ) AS rn
+                       FROM updates
+                   ) WHERE rn > ?
+               )""",
+            (keep,),
+        )
+        return cur.rowcount
+
+
 def prune_activity_log(keep_days: int = 180):
     """Delete activity log entries older than keep_days days."""
     cutoff = (

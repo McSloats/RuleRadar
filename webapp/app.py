@@ -496,6 +496,22 @@ def setup_repos():
         "setup_repos.html",
         available=list(ruleradar.AVAILABLE_REPOS.values()),
         configured_repos=configured_repos,
+        history_choices=db.MAX_EVENTS_CHOICES,
+        history_default=db.DEFAULT_MAX_EVENTS_PER_RULE,
+        # Storage model for the change-history estimate (measured Oct 2026
+        # on the six default repos: ~3.1 KB per stored modification incl.
+        # its diff, ~5.7 KB of database per indexed rule, and ~1.2
+        # modifications per rule per year)
+        storage_model={
+            "bytes_per_event":     3300,
+            "db_bytes_per_rule":   5900,
+            "mods_per_rule_year":  1.2,
+            "headroom":            1.25,
+            "repos": {
+                name: {"rules": cfg.get("approx_rules", 0), "mb": cfg.get("approx_disk_mb", 0)}
+                for name, cfg in ruleradar.AVAILABLE_REPOS.items()
+            },
+        },
     )
 
 
@@ -534,10 +550,19 @@ def setup_repos_submit():
         flash("No valid repositories selected.", "error")
         return redirect(url_for("setup_repos"))
 
+    # Per-rule change-history limit chosen by the installer (default 50)
+    try:
+        max_events = int(request.form.get("max_events", db.DEFAULT_MAX_EVENTS_PER_RULE))
+    except ValueError:
+        max_events = db.DEFAULT_MAX_EVENTS_PER_RULE
+    if max_events not in db.MAX_EVENTS_CHOICES:
+        max_events = db.DEFAULT_MAX_EVENTS_PER_RULE
+    db.set_app_setting("max_events_per_rule", str(max_events))
+
     db.log_activity(
         "admin", "Repository setup completed",
         actor=current_user.username,
-        detail=f"repos enabled: {', '.join(added)}",
+        detail=f"repos enabled: {', '.join(added)}; change history kept per rule: {max_events}",
     )
 
     # Start the initial scan — it will clone and index all pending repos
@@ -790,7 +815,7 @@ def history():
         selected = db.get_detection(source, file_path)
         # Every recorded event for the rule (new/modified/renamed/deleted),
         # newest first, for the timeline
-        events = db.get_rule_updates(source, file_path, limit=50)
+        events = db.get_rule_updates(source, file_path, limit=db.get_max_events_per_rule())
         for e in events:
             if e.get("diff_text"):
                 added, removed = ruleradar.diff_stats(e["diff_text"])
@@ -1177,6 +1202,7 @@ def admin():
         current_timezone=db.get_app_setting("timezone", "UTC"),
         common_timezones=COMMON_TIMEZONES,
         max_fetch_failures=ruleradar.MAX_CONSECUTIVE_FETCH_FAILURES,
+        max_events_per_rule=db.get_max_events_per_rule(),
     )
 
 
