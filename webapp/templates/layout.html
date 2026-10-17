@@ -40,11 +40,22 @@
     }
 
     /* ── Navbar — left side panel on desktop, top bar + drawer on mobile ── */
-    :root { --nav-width: 200px; --nav-width-collapsed: 64px; }
+    /* Every row puts its icon in the same --nav-slot-wide column (the
+       logo's width), at the same left offset (--nav-row-pad), so all icons
+       share one vertical center line in both states. The collapsed width is
+       exactly that column plus padding, which centers the line in the rail. */
+    :root {
+      --nav-width: 200px;
+      --nav-pad: 0.85rem;
+      --nav-row-pad: 0.6rem;
+      --nav-slot: 26px;
+      --nav-gap: 0.55rem;
+      --nav-width-collapsed: calc(2 * var(--nav-pad) + 2 * var(--nav-row-pad) + var(--nav-slot) + 1px);
+    }
     nav {
       background: #160f2a;
       border-right: 1px solid #2b1e4a;
-      padding: 1rem 0.85rem;
+      padding: 1rem var(--nav-pad);
       width: var(--nav-width);
       height: 100vh;
       display: flex;
@@ -57,17 +68,10 @@
       z-index: 100;
       overflow-y: auto;
     }
-    .nav-brand-row {
-      display: flex;
-      align-items: center;
-      justify-content: flex-start;
-      padding: 0.3rem 0.6rem 0.9rem;
-      gap: 1.25rem;
-    }
     .nav-brand {
       display: inline-flex;
       align-items: center;
-      gap: 0.45rem;
+      gap: var(--nav-gap);
       font-weight: 700;
       font-size: 1rem;
       color: #d4a017;
@@ -75,12 +79,14 @@
       letter-spacing: 0.02em;
       white-space: nowrap;
       min-width: 0;
+      padding: 0.3rem var(--nav-row-pad);
     }
     .nav-icon {
-      width: 26px;
-      height: 26px;
+      width: var(--nav-slot);
+      height: var(--nav-slot);
       flex-shrink: 0;
     }
+    /* Sits below the logo, centered on the icon column in both states. */
     .nav-collapse-toggle {
       background: none;
       border: 1px solid #2b1e4a;
@@ -94,6 +100,7 @@
       cursor: pointer;
       flex-shrink: 0;
       font-size: 0.6rem;
+      margin: 0.5rem 0 0.9rem calc(var(--nav-row-pad) + (var(--nav-slot) - 22px) / 2);
       transition: background 0.15s, color 0.15s;
     }
     .nav-collapse-toggle:hover { background: #2b1e4a; color: #ede8f5; }
@@ -101,10 +108,10 @@
     .nav-link {
       display: flex;
       align-items: center;
-      gap: 0.55rem;
+      gap: var(--nav-gap);
       color: #9080b8;
       text-decoration: none;
-      padding: 0.45rem 0.6rem;
+      padding: 0.45rem var(--nav-row-pad);
       border-radius: 5px;
       font-size: 0.875rem;
       white-space: nowrap;
@@ -112,13 +119,13 @@
     }
     .nav-link-icon {
       flex-shrink: 0;
-      width: 18px;
+      width: var(--nav-slot);
       height: 18px;
       display: flex;
       align-items: center;
       justify-content: center;
     }
-    .nav-link-icon svg { width: 100%; height: 100%; }
+    .nav-link-icon svg { width: 18px; height: 18px; }
     .nav-link:hover { color: #ede8f5; background: #2b1e4a; }
     .nav-link.active { color: #ede8f5; background: #2b1e4a; }
     .nav-divider { height: 1px; width: 100%; background: #2b1e4a; margin: 0.4rem 0; }
@@ -126,8 +133,8 @@
     .nav-user {
       display: flex;
       align-items: center;
-      gap: 0.5rem;
-      padding: 0.5rem 0.6rem 0.2rem;
+      gap: var(--nav-gap);
+      padding: 0.5rem var(--nav-row-pad) 0.2rem;
     }
     .nav-avatar {
       width: 24px;
@@ -141,6 +148,7 @@
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
+      margin: 0 calc((var(--nav-slot) - 24px) / 2);
     }
     .nav-user-text {
       font-size: 0.8rem;
@@ -151,15 +159,14 @@
     .nav-logout {
       display: flex;
       align-items: center;
-      justify-content: center;
-      gap: 0.55rem;
+      gap: var(--nav-gap);
       font-size: 0.8rem;
       color: #9080b8;
       text-decoration: none;
-      padding: 0.4rem 0.6rem;
+      padding: 0.4rem calc(var(--nav-row-pad) - 1px); /* minus its 1px border */
       border-radius: 5px;
       border: 1px solid #2b1e4a;
-      margin: 0.4rem 0.6rem 0;
+      margin: 0.4rem 0 0;
     }
     .nav-logout:hover { background: #2b1e4a; color: #ede8f5; }
     .nav-admin-badge {
@@ -178,8 +185,8 @@
       color: #d4a017;
       display: flex;
       align-items: flex-start;
-      gap: 0.4rem;
-      padding: 0.3rem 0.6rem;
+      gap: var(--nav-gap);
+      padding: 0.3rem var(--nav-row-pad);
     }
     #scan-badge.scanning { color: #f6ad55; }
     #scan-badge .dot {
@@ -188,7 +195,7 @@
       background: currentColor;
       display: inline-block;
       flex-shrink: 0;
-      margin-top: 0.3rem;
+      margin: 0.3rem calc((var(--nav-slot) - 7px) / 2) 0;
     }
     #scan-badge.scanning .dot { animation: pulse-dot 1s ease-in-out infinite; }
     @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.3} }
@@ -818,26 +825,17 @@
     .nav-mobile-divider { height: 1px; background: #2b1e4a; margin: 0.4rem 0; }
 
     /* ── Collapsed sidebar (desktop only — on mobile the sidebar isn't used
-       at all, see the max-width breakpoint below) ── */
+       at all, see the max-width breakpoint below) ──
+       Only width and display:none (for the text) change here, so icons keep
+       the same size and X position and nothing jumps when toggling. */
     @media (min-width: 701px) {
-      html.nav-collapsed nav { width: var(--nav-width-collapsed); padding: 1rem 0.4rem; }
+      html.nav-collapsed nav { width: var(--nav-width-collapsed); }
       html.nav-collapsed main { margin-left: var(--nav-width-collapsed); }
 
-      /* Hide every text label; icons (including the logo) stay */
       html.nav-collapsed .nav-text,
       html.nav-collapsed .nav-brand-full { display: none; }
 
-      html.nav-collapsed .nav-brand-row {
-        flex-direction: column;
-        justify-content: center;
-        gap: 0.5rem;
-        padding: 0.3rem 0 0.9rem;
-      }
-      html.nav-collapsed .nav-link { justify-content: center; padding: 0.5rem 0; }
-      html.nav-collapsed .nav-logout { padding: 0.5rem 0; }
       html.nav-collapsed .nav-collapse-toggle .toggle-icon { transform: rotate(180deg); }
-      html.nav-collapsed #scan-badge { justify-content: center; padding: 0.3rem 0; }
-      html.nav-collapsed .nav-user { justify-content: center; padding: 0.5rem 0 0.2rem; }
     }
 
     /* ── Responsive breakpoints ── */
@@ -855,7 +853,7 @@
         border-bottom: 1px solid #2b1e4a;
         gap: 1.25rem;
       }
-      .nav-brand-row { padding: 0; }
+      .nav-brand { padding: 0; }
       .nav-collapse-toggle { display: none; }
       main { margin-left: 0; }
 
@@ -898,16 +896,14 @@
 
 {% if current_user.is_authenticated %}
 <nav>
-  <div class="nav-brand-row">
-    <a class="nav-brand" href="{{ url_for('index') }}" title="RuleRadar">
-      <img src="{{ url_for('static', filename='icon.svg') }}" class="nav-icon" alt="RuleRadar">
-      <span class="nav-brand-full">RuleRadar</span>
-    </a>
-    <button class="nav-collapse-toggle" id="nav-collapse-toggle" onclick="toggleSidebar()"
-            aria-label="Collapse sidebar" title="Collapse sidebar">
-      <span class="toggle-icon">◀</span>
-    </button>
-  </div>
+  <a class="nav-brand" href="{{ url_for('index') }}" title="RuleRadar">
+    <img src="{{ url_for('static', filename='icon.svg') }}" class="nav-icon" alt="RuleRadar">
+    <span class="nav-brand-full">RuleRadar</span>
+  </a>
+  <button class="nav-collapse-toggle" id="nav-collapse-toggle" onclick="toggleSidebar()"
+          aria-label="Collapse sidebar" title="Collapse sidebar">
+    <span class="toggle-icon">◀</span>
+  </button>
 
   <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}"
      href="{{ url_for('dashboard') }}" title="Dashboard">
