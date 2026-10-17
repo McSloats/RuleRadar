@@ -484,6 +484,23 @@ def get_dashboard_totals(cutoff_7d: str) -> dict:
     return {"total_rules": total_rules, "events_7d": events_7d}
 
 
+def get_change_activity(cutoff: str) -> list[tuple[str, str, str, int]]:
+    """
+    Rule-change counts since `cutoff` for the dashboard activity chart, as
+    (minute "YYYY-MM-DDTHH:MM", source, change_type, count). Bucketed by
+    minute rather than day so the caller can assign days in the display
+    timezone; releases are excluded.
+    """
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT substr(detected_at, 1, 16), source, change_type, COUNT(*)"
+            " FROM updates WHERE detected_at >= ?"
+            " GROUP BY 1, 2, 3",
+            (cutoff,),
+        ).fetchall()
+    return [tuple(r) for r in rows]
+
+
 # ── Per-user rule filter helpers ───────────────────────────────────────────────
 
 def get_user_rule_filters(user_id: int) -> list[dict]:
@@ -960,14 +977,18 @@ def get_rule_updates(
     return [dict(r) for r in rows]
 
 
-def get_recent_rule_changes(limit: int = 5) -> list[dict]:
+def get_recent_rule_changes(limit: int = 5, since: str = "") -> list[dict]:
     """Return the most recent rule-change events (new/modified/renamed/
-    deleted; releases excluded), newest first. History page default view."""
+    deleted; releases excluded), newest first, optionally only those at or
+    after `since`. Used by the History page and the dashboard radar."""
+    where, params = "", []
+    if since:
+        where, params = "WHERE detected_at >= ?", [since]
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT id, source, file_path, title, change_type, detected_at"
-            " FROM updates ORDER BY detected_at DESC, id DESC LIMIT ?",
-            (limit,),
+            f" FROM updates {where} ORDER BY detected_at DESC, id DESC LIMIT ?",
+            params + [limit],
         ).fetchall()
     return [dict(r) for r in rows]
 

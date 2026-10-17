@@ -23,64 +23,129 @@
   </div>
 </div>
 
-{# ── Repository cards ─────────────────────────────────────────────────────── #}
+{# ── Charts: rules by source + change activity ───────────────────────────── #}
 {% if repos %}
-<div class="dash-repo-grid">
-  {% for repo in repos %}
-  <div class="dash-repo-card {% if repo.status == 'error' %}dash-repo-card-error{% endif %}"
-       id="dash-card-{{ repo.name }}" data-status="{{ repo.status }}">
+<div class="dash-insights">
 
-    {# Header: source badge + name + status dot #}
-    <div class="dash-card-header">
-      <span class="badge {% if repo.name in ['sigma', 'splunk', 'elastic', 'panther', 'sublime', 'anvilogic'] %}badge-{{ repo.name }}{% else %}badge-system{% endif %}">
-        {{ repo.name }}
-      </span>
-      <span class="dash-card-title">{{ repo.display_name }}</span>
-      <span class="dash-status-dot dash-status-{{ repo.status }}"
-            title="{{ repo.status }}"></span>
+  <section class="dash-panel" aria-labelledby="dash-donut-title">
+    <div class="dash-panel-head">
+      <h3 class="dash-panel-title" id="dash-donut-title">Rules by Source</h3>
+      <span class="dash-panel-hint">Click a source to filter activity</span>
     </div>
+    <div class="dash-donut-wrap">
+      <div class="dash-donut" id="dash-donut">
+        <svg viewBox="0 0 200 200" role="group" aria-label="Rules by source"></svg>
+        <div class="dash-donut-center" aria-hidden="true">
+          <p class="dash-donut-value" id="dash-donut-value"></p>
+          <p class="dash-donut-label" id="dash-donut-label"></p>
+        </div>
+      </div>
+      <ul class="dash-legend" id="dash-donut-legend"></ul>
+    </div>
+  </section>
 
-    {# Repo identity #}
-    <p class="dash-card-repo-id">
-      {{ repo.owner }}/{{ repo.repo }}
-      <span class="text-muted">· {{ repo.branch }}</span>
-    </p>
+  <section class="dash-panel" aria-labelledby="dash-activity-title">
+    <div class="dash-panel-head">
+      <h3 class="dash-panel-title" id="dash-activity-title">Change Activity</h3>
+      <button type="button" class="dash-chip" id="dash-source-chip" hidden
+              aria-label="Clear source filter"></button>
+      <div class="dash-range" role="group" aria-label="Time range">
+        <button type="button" data-days="7">7d</button>
+        <button type="button" data-days="30" class="active">30d</button>
+        <button type="button" data-days="90">90d</button>
+      </div>
+    </div>
+    <p class="dash-activity-summary" id="dash-activity-summary"></p>
+    <div class="dash-activity-chart" id="dash-activity-chart">
+      <svg role="img" aria-labelledby="dash-activity-title dash-activity-summary" tabindex="0"></svg>
+      <p class="dash-chart-empty" id="dash-activity-empty" hidden></p>
+    </div>
+    <ul class="dash-legend dash-legend-inline" id="dash-activity-legend"></ul>
+  </section>
+
+  <div class="dash-tooltip" id="dash-tooltip" role="tooltip" hidden></div>
+</div>
+{% endif %}
+
+{# ── Radar sweep: recent rule changes as contacts ─────────────────────────── #}
+{% if repos %}
+<section class="dash-panel dash-radar-panel" aria-labelledby="dash-radar-title">
+  <div class="dash-panel-head">
+    <h3 class="dash-panel-title" id="dash-radar-title">Radar</h3>
+    <span class="dash-panel-hint">Rule changes from the last 7 days · one ring per day, newest at the center · click a blip for its history, or a cluster for Updates</span>
+  </div>
+  <div class="radar-layout">
+    <div class="radar" id="radar">
+      <svg class="radar-grid" viewBox="-150 -150 300 300" aria-hidden="true"></svg>
+      <div class="radar-sweep" aria-hidden="true"></div>
+      <svg class="radar-blips" viewBox="-150 -150 300 300" role="group" aria-label="Recent rule changes"></svg>
+      <div class="dash-tooltip" id="radar-tooltip" role="tooltip" hidden></div>
+    </div>
+    <div class="radar-side">
+      <div class="radar-readout" aria-live="off">
+        <p class="radar-readout-label">Last contact</p>
+        <p class="radar-readout-title" id="radar-contact-title">Scanning…</p>
+        <p class="radar-readout-meta" id="radar-contact-meta"></p>
+      </div>
+      <dl class="radar-stats">
+        <div><dt>Contacts</dt><dd id="radar-stat-count">0</dd></div>
+        <div><dt>Last 24h</dt><dd id="radar-stat-24h">0</dd></div>
+        <div><dt>Sweep</dt><dd id="radar-stat-sweep">Idle</dd></div>
+      </dl>
+      <ul class="dash-legend dash-legend-inline" id="radar-legend"></ul>
+      <button type="button" class="dash-chip radar-pause" id="radar-pause" aria-pressed="false">❚❚ Pause sweep</button>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{# ── Repository rows ──────────────────────────────────────────────────────── #}
+{% if repos %}
+<section class="dash-panel dash-repos" aria-label="Repositories">
+  <div class="dash-repo-row dash-repo-head" aria-hidden="true">
+    <span>Repository</span>
+    <span class="num">Rules</span>
+    <span class="num">New (24h)</span>
+    <span class="num">Modified (24h)</span>
+    <span>Last sync</span>
+    <span>SHA</span>
+    <span></span>
+  </div>
+  {% for repo in repos %}
+  <div class="dash-repo-row {% if repo.status == 'error' %}dash-repo-row-error{% endif %}"
+       id="dash-row-{{ repo.name }}" data-source="{{ repo.name }}" data-status="{{ repo.status }}">
+
+    {# Identity: status dot + source badge + name, repo id underneath #}
+    <div class="dash-repo-id">
+      <div class="dash-repo-name">
+        <span class="dash-status-dot dash-status-{{ repo.status }}"
+              title="{{ repo.status }}"></span>
+        <span class="badge {% if repo.name in ['sigma', 'splunk', 'elastic', 'panther', 'sublime', 'anvilogic'] %}badge-{{ repo.name }}{% else %}badge-system{% endif %}">
+          {{ repo.name }}
+        </span>
+        <span class="dash-card-title">{{ repo.display_name }}</span>
+      </div>
+      <p class="dash-card-repo-id">
+        {{ repo.owner }}/{{ repo.repo }}
+        <span class="text-muted">· {{ repo.branch }}</span>
+      </p>
+    </div>
 
     {% if repo.status in ['ready', 'indexing'] %}
 
-    {# Rule count + 24h changes #}
-    <div class="dash-metrics">
-      <div class="dash-metric">
-        <p class="dash-metric-value" data-dash="total">{{ "{:,}".format(repo.total_rules) }}</p>
-        <p class="dash-metric-label">Rules</p>
-      </div>
-      <div class="dash-metric">
-        <p class="dash-metric-value {% if repo.new_24h > 0 %}dash-val-new{% endif %}" data-dash="new24h">
-          +{{ repo.new_24h }}
-        </p>
-        <p class="dash-metric-label">New (24h)</p>
-      </div>
-      <div class="dash-metric">
-        <p class="dash-metric-value {% if repo.modified_24h > 0 %}dash-val-mod{% endif %}" data-dash="mod24h">
-          ~{{ repo.modified_24h }}
-        </p>
-        <p class="dash-metric-label">Modified (24h)</p>
-      </div>
-    </div>
-
-    {# Last sync + SHA #}
-    <div class="dash-card-meta">
-      <span>
-        <span class="detail-label">Last sync</span>
-        <span data-dash="last-sync">{{ repo.last_sync_rel }}</span>
-      </span>
-      {% if repo.last_sha %}
-      <span>
-        <span class="detail-label">SHA</span>
-        <code class="dash-sha">{{ repo.last_sha[:8] }}</code>
-      </span>
-      {% endif %}
-    </div>
+    <span class="num" data-label="Rules">
+      <span class="dash-metric-value" data-dash="total">{{ "{:,}".format(repo.total_rules) }}</span>
+    </span>
+    <span class="num" data-label="New (24h)">
+      <span class="dash-metric-value {% if repo.new_24h > 0 %}dash-val-new{% endif %}" data-dash="new24h">+{{ repo.new_24h }}</span>
+    </span>
+    <span class="num" data-label="Modified (24h)">
+      <span class="dash-metric-value {% if repo.modified_24h > 0 %}dash-val-mod{% endif %}" data-dash="mod24h">~{{ repo.modified_24h }}</span>
+    </span>
+    <span class="dash-repo-meta" data-label="Last sync" data-dash="last-sync">{{ repo.last_sync_rel }}</span>
+    <span class="dash-repo-meta" data-label="SHA">
+      {% if repo.last_sha %}<code class="dash-sha">{{ repo.last_sha[:8] }}</code>{% else %}<span class="text-muted">—</span>{% endif %}
+    </span>
 
     {% elif repo.status == 'cloning' %}
     <p class="dash-card-notice dash-notice-progress">⟳ Cloning repository…</p>
@@ -107,7 +172,7 @@
 
   </div>
   {% endfor %}
-</div>
+</section>
 
 {% else %}
 <div class="empty-state">
@@ -154,52 +219,317 @@
   margin: 0;
 }
 
-/* ── Repository card grid ────────────────────────────────────────────────── */
-.dash-repo-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1rem;
-}
-@media (max-width: 900px) {
-  .dash-repo-grid { grid-template-columns: repeat(2, 1fr); }
-}
-@media (max-width: 600px) {
-  .dash-repo-grid { grid-template-columns: 1fr; }
-  .dash-stats-bar { flex-direction: column; }
-  .dash-stat-card { min-width: 0; }
-}
-.dash-repo-card {
+/* ── Panels (charts + repository list) ───────────────────────────────────── */
+.dash-insights [hidden] { display: none !important; }
+.dash-panel {
   background: #160f2a;
   border: 1px solid #2b1e4a;
   border-radius: 8px;
   padding: 1.1rem 1.25rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
+  min-width: 0;
 }
-.dash-repo-card-error {
-  border-color: #7c1d1d;
+.dash-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.9rem;
+}
+.dash-panel-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #ede8f5;
+  margin: 0;
+  flex: 1;
+}
+.dash-panel-hint { font-size: 0.72rem; color: #6a5888; }
+
+.dash-insights {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  position: relative;
+}
+@media (max-width: 1000px) {
+  .dash-insights { grid-template-columns: 1fr; }
 }
 
-/* Header row */
-.dash-card-header {
+/* ── Donut ── */
+.dash-donut-wrap {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.dash-donut { position: relative; width: 200px; height: 200px; flex-shrink: 0; }
+.dash-donut svg { width: 100%; height: 100%; overflow: visible; }
+.dash-donut-slice {
+  cursor: pointer;
+  stroke: #160f2a;
+  stroke-width: 2;
+  transition: transform 0.18s ease, opacity 0.18s ease;
+  outline: none;
+}
+.dash-donut-slice.is-dim { opacity: 0.3; }
+.dash-donut-slice:focus-visible { stroke: #ede8f5; }
+.dash-donut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  text-align: center;
+}
+.dash-donut-value { font-size: 1.5rem; font-weight: 700; color: #ede8f5; margin: 0; line-height: 1.1; }
+.dash-donut-label { font-size: 0.7rem; color: #9080b8; margin: 0.15rem 0 0; text-transform: uppercase; letter-spacing: 0.05em; }
+
+/* ── Legends (double as the table view: every value is readable here) ── */
+.dash-legend { list-style: none; margin: 0; padding: 0; flex: 1; min-width: 180px; }
+.dash-legend button {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  padding: 0.3rem 0.45rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: #c8bfe0;
+  cursor: pointer;
+  text-align: left;
 }
+.dash-legend button:hover, .dash-legend button.is-active { background: #2b1e4a; color: #ede8f5; }
+.dash-legend button.is-dim { opacity: 0.45; }
+.dash-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+.dash-legend-name { flex: 1; }
+.dash-legend-num { color: #ede8f5; font-variant-numeric: tabular-nums; }
+.dash-legend-pct { color: #6a5888; font-variant-numeric: tabular-nums; width: 3.2em; text-align: right; }
+.dash-legend-inline { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; margin-top: 0.5rem; }
+.dash-legend-inline li { display: flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; color: #9080b8; }
+
+/* ── Activity chart ── */
+.dash-range { display: inline-flex; border: 1px solid #2b1e4a; border-radius: 6px; overflow: hidden; }
+.dash-range button {
+  background: none;
+  border: none;
+  color: #9080b8;
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 0.3rem 0.65rem;
+  cursor: pointer;
+}
+.dash-range button + button { border-left: 1px solid #2b1e4a; }
+.dash-range button:hover { background: #1e1438; color: #ede8f5; }
+.dash-range button.active { background: #2b1e4a; color: #ede8f5; font-weight: 600; }
+.dash-chip {
+  background: #2b1e4a;
+  border: 1px solid #3d2b66;
+  border-radius: 999px;
+  color: #ede8f5;
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.dash-chip:hover { background: #3d2b66; }
+.dash-activity-summary { font-size: 0.8rem; color: #9080b8; margin: -0.4rem 0 0.6rem; }
+.dash-activity-summary strong { color: #ede8f5; }
+.dash-activity-chart { position: relative; height: 220px; }
+.dash-activity-chart svg { width: 100%; height: 100%; display: block; outline: none; }
+.dash-activity-chart svg:focus-visible { outline: 1px solid #3d2b66; outline-offset: 2px; border-radius: 4px; }
+.dash-axis-text { font-size: 10px; fill: #6a5888; font-variant-numeric: tabular-nums; }
+.dash-grid-line { stroke: #2b1e4a; stroke-width: 1; }
+.dash-baseline { stroke: #3d2b66; stroke-width: 1; }
+.dash-bar-seg { stroke: #160f2a; stroke-width: 1; transition: opacity 0.12s; }
+.dash-day.is-hover .dash-bar-seg { filter: brightness(1.25); }
+.dash-day-hit { fill: transparent; cursor: default; }
+.dash-day.is-hover .dash-day-hit { fill: rgba(144, 128, 184, 0.08); }
+.dash-bar-grow { transform-box: fill-box; transform-origin: bottom; animation: dash-grow 0.45s ease-out both; }
+@keyframes dash-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .dash-bar-grow { animation: none; }
+  .dash-donut-slice { transition: none; }
+}
+.dash-chart-empty {
+  position: absolute;
+  inset: 0 0 22px 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.82rem;
+  color: #6a5888;
+  margin: 0;
+  pointer-events: none;
+}
+
+/* ── Shared tooltip ── */
+.dash-tooltip {
+  position: absolute;
+  z-index: 20;
+  pointer-events: none;
+  background: #0a0716;
+  border: 1px solid #3d2b66;
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.75rem;
+  color: #9080b8;
+  min-width: 140px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+.dash-tooltip-title { color: #9080b8; margin: 0 0 0.3rem; font-size: 0.72rem; }
+.dash-tooltip-row { display: flex; align-items: center; gap: 0.45rem; margin: 0.12rem 0; }
+.dash-tooltip-key { width: 12px; height: 2px; border-radius: 1px; flex-shrink: 0; }
+.dash-tooltip-row strong { color: #ede8f5; font-variant-numeric: tabular-nums; min-width: 2.2em; white-space: nowrap; }
+
+/* ── Radar sweep ─────────────────────────────────────────────────────────── */
+.dash-radar-panel { margin-bottom: 1.5rem; }
+.dash-radar-panel [hidden] { display: none !important; }
+.radar .dash-tooltip-title { color: #ede8f5; font-weight: 600; font-size: 0.78rem; max-width: 260px; }
+.radar-layout {
+  display: flex;
+  gap: 2rem;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.radar {
+  position: relative;
+  width: min(100%, 460px);
+  aspect-ratio: 1;
+  flex-shrink: 0;
+}
+.radar svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.radar-blips { z-index: 2; }
+.radar .dash-tooltip { z-index: 3; }
+.radar-sweep {
+  position: absolute;
+  /* Matches the outer ring: radius 100 of the 300-unit viewBox */
+  inset: calc(100% * 50 / 300);
+  border-radius: 50%;
+  z-index: 1;
+  pointer-events: none;
+  background: conic-gradient(from 0deg,
+    rgba(212, 160, 23, 0) 0deg,
+    rgba(212, 160, 23, 0) 285deg,
+    rgba(212, 160, 23, 0.07) 330deg,
+    rgba(212, 160, 23, 0.28) 360deg);
+  will-change: transform;
+}
+.radar-sweep::after {
+  content: "";
+  position: absolute;
+  left: calc(50% - 1px);
+  top: 0;
+  width: 2px;
+  height: 50%;
+  background: linear-gradient(to top, rgba(240, 192, 64, 0.15), #f0c040);
+  box-shadow: 0 0 8px rgba(240, 192, 64, 0.6);
+}
+.radar-ring       { fill: none; stroke: #2b1e4a; stroke-width: 0.6; }
+.radar-ring-outer { fill: #0d0820; stroke: #3d2b66; stroke-width: 0.9; }
+.radar-spoke      { stroke: #2b1e4a; stroke-width: 0.5; }
+.radar-ring-label { font-size: 5.5px; fill: #6a5888; }
+.radar-sector-label { font-size: 7px; fill: #9080b8; font-weight: 600; letter-spacing: 0.04em; }
+.radar-sector-arc { fill: none; stroke-width: 2.2; stroke-linecap: round; transition: opacity 0.2s; }
+.radar-sector-arc.is-dim, .radar-sector-label.is-dim { opacity: 0.25; }
+.radar-blip { cursor: pointer; outline: none; transition: opacity 0.2s; }
+.radar-blip.is-dim { opacity: 0.12; }
+.radar-blip-hit { fill: transparent; }
+.radar-blip-core { stroke: #0d0820; stroke-width: 0.8; }
+.radar-blip-ping { fill: none; stroke-width: 0.8; }
+.radar-blip-halo { fill: none; stroke-width: 0.7; stroke-dasharray: 1.5 1.5; opacity: 0.8; }
+.radar-blip-count { font-size: 5px; font-weight: 700; fill: #0d0820; pointer-events: none; }
+.radar-legend-cluster { display: flex; align-items: center; gap: 0.4rem; }
+.radar-cluster-swatch {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: #9080b8; outline: 1px dashed #9080b8; outline-offset: 1px;
+}
+.radar-blip:hover .radar-blip-core,
+.radar-blip:focus-visible .radar-blip-core { stroke: #ede8f5; stroke-width: 1.2; }
+
+.radar-side { flex: 1; min-width: 240px; max-width: 420px; display: flex; flex-direction: column; gap: 1rem; }
+.radar-readout {
+  background: #0d0820;
+  border: 1px solid #2b1e4a;
+  border-left: 3px solid #d4a017;
+  border-radius: 6px;
+  padding: 0.75rem 0.9rem;
+  min-height: 92px;
+}
+.radar-readout-label { font-size: 0.66rem; color: #6a5888; text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 0.3rem; }
+.radar-readout-title { font-size: 0.92rem; font-weight: 600; color: #ede8f5; margin: 0 0 0.4rem; line-height: 1.3; }
+.radar-readout-title a { color: inherit; text-decoration: none; }
+.radar-readout-title a:hover { color: #d4a017; }
+.radar-readout-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font-size: 0.75rem; color: #9080b8; margin: 0; }
+.radar-readout.is-ping { animation: radar-readout-ping 0.6s ease-out; }
+@keyframes radar-readout-ping { from { border-left-color: #f0c040; background: #1e1438; } to { border-left-color: #d4a017; background: #0d0820; } }
+.radar-stats { display: flex; gap: 1.5rem; margin: 0; }
+.radar-stats dt { font-size: 0.66rem; color: #6a5888; text-transform: uppercase; letter-spacing: 0.05em; }
+.radar-stats dd { margin: 0.1rem 0 0; font-size: 1.1rem; font-weight: 700; color: #ede8f5; font-variant-numeric: tabular-nums; }
+.radar-pause { align-self: flex-start; }
+@media (prefers-reduced-motion: reduce) {
+  .radar-sweep { display: none; }
+  .radar-readout.is-ping { animation: none; }
+}
+
+/* ── Repository rows ─────────────────────────────────────────────────────── */
+.dash-repos { padding: 0.35rem 0; }
+.dash-repo-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 80px 90px 110px 90px 90px 220px;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  border-top: 1px solid #2b1e4a;
+  border-left: 3px solid var(--src-color, transparent);
+  transition: background 0.15s;
+}
+.dash-repo-head {
+  border-top: none;
+  border-left-color: transparent;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  font-size: 0.68rem;
+  color: #6a5888;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.dash-repo-row.is-highlight { background: #1e1438; }
+.dash-repo-row-error { background: #1a0d14; }
+.dash-repo-row .num { text-align: right; }
+.dash-repo-id { min-width: 0; }
+.dash-repo-name { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+/* Custom repo names can be long -- keep the badge from crowding out the display name */
+.dash-repo-name .badge { max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 1; }
+.dash-repo-meta { font-size: 0.8rem; color: #9080b8; }
+/* A non-ready repo has no metrics -- its notice spans the metric columns */
+.dash-repo-row > .dash-card-notice { grid-column: 2 / 7; }
+
 .dash-card-title {
-  flex: 1;
   font-weight: 600;
-  font-size: 0.92rem;
+  font-size: 0.9rem;
   color: #ede8f5;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
 .dash-card-repo-id {
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   color: #6a5888;
-  margin: 0;
+  margin: 0.25rem 0 0 1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Status dot */
@@ -221,44 +551,15 @@
   50%       { opacity: 0.4; }
 }
 
-/* Metrics row */
-.dash-metrics {
-  display: flex;
-  gap: 0.5rem;
-}
-.dash-metric {
-  flex: 1;
-  background: #0a0716;
-  border: 1px solid #2b1e4a;
-  border-radius: 6px;
-  padding: 0.5rem 0.6rem;
-  text-align: center;
-}
 .dash-metric-value {
-  font-size: 1.35rem;
+  font-size: 1.05rem;
   font-weight: 700;
   color: #ede8f5;
-  margin: 0 0 0.1rem;
-  line-height: 1.1;
-}
-.dash-metric-label {
-  font-size: 0.68rem;
-  color: #6a5888;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin: 0;
+  font-variant-numeric: tabular-nums;
 }
 .dash-val-new { color: #6ee7b7; }
 .dash-val-mod { color: #d4a017; }
 
-/* Meta row (last sync + SHA) */
-.dash-card-meta {
-  display: flex;
-  gap: 1rem;
-  flex-wrap: wrap;
-  font-size: 0.78rem;
-  color: #9080b8;
-}
 .dash-sha {
   font-family: monospace;
   font-size: 0.75rem;
@@ -288,16 +589,475 @@
 .dash-card-links {
   display: flex;
   gap: 0.5rem;
-  margin-top: auto;
-  padding-top: 0.25rem;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+/* Narrow screens: each repository row stacks, metrics become labelled pairs */
+@media (max-width: 1100px) {
+  .dash-repo-head { display: none; }
+  .dash-repo-row {
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 0.6rem 1rem;
+  }
+  .dash-repo-row > .dash-repo-id,
+  .dash-repo-row > .dash-card-notice,
+  .dash-repo-row > .dash-card-links { grid-column: 1 / -1; }
+  .dash-card-links { justify-content: flex-start; }
+  .dash-repo-row .num { text-align: left; }
+  .dash-repo-row [data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.66rem;
+    color: #6a5888;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.1rem;
+  }
+}
+@media (max-width: 600px) {
+  .dash-stats-bar { flex-direction: column; }
+  .dash-stat-card { min-width: 0; }
+  .dash-repo-row { padding: 0.75rem 0.9rem; }
 }
 </style>
 
+{% if repos %}
+<script id="dash-data" type="application/json">{{ {
+  "sources":  repos | map(attribute="name") | list,
+  "totals":   repos | map(attribute="total_rules") | list,
+  "statuses": repos | map(attribute="status") | list,
+  "activity": activity,
+  "radar":    radar,
+  "updates_url": url_for("updates"),
+  "tz":       app_tz_name,
+} | tojson }}</script>
+{% endif %}
+
 <script>
+/* ── Dashboard charts ────────────────────────────────────────────────────────
+   Donut: rules per source. Click a slice (or its legend row) to filter the
+   activity chart to that source and highlight its repository row.
+   Activity: daily rule changes stacked by change type, 7/30/90-day range.
+   Colors are validated (dataviz validator, dark mode, surface #160f2a).
+   All labels go in via textContent / createElementNS, never innerHTML.
+   ─────────────────────────────────────────────────────────────────────────── */
+(function () {
+  'use strict';
+  var dataEl = document.getElementById('dash-data');
+  if (!dataEl) return;
+  var DATA = JSON.parse(dataEl.textContent);
+
+  var NS = 'http://www.w3.org/2000/svg';
+  // Fixed categorical order -- a source keeps its color for as long as it
+  // keeps its position in the repo list (repos are ordered by date added).
+  // Only these six hues are validated as a set, so a 7th+ repository (e.g.
+  // a custom one added later) folds into a single neutral "Other" group
+  // rather than getting a generated color.
+  var SOURCE_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300'];
+  var OTHER_COLOR   = '#6a5888';
+  var OTHER_KEY     = '__other__';
+  var KNOWN_BADGES  = ['sigma', 'splunk', 'elastic', 'panther', 'sublime', 'anvilogic'];
+  // Stack order bottom -> top; no two adjacent hues are confusable.
+  var TYPES = [
+    { key: 'new',      label: 'New',      color: '#199e70' },
+    { key: 'modified', label: 'Modified', color: '#c98500' },
+    { key: 'renamed',  label: 'Renamed',  color: '#9085e9' },
+    { key: 'deleted',  label: 'Deleted',  color: '#e66767' },
+  ];
+
+  // ── Groups: one per repository, plus "Other" for everything past six ─────
+  var GROUPS = [], groupBySource = {};
+  DATA.sources.forEach(function (src, i) {
+    var g;
+    if (i < SOURCE_COLORS.length) {
+      g = { key: src, label: src, color: SOURCE_COLORS[i], members: [] };
+      GROUPS.push(g);
+    } else {
+      g = GROUPS[SOURCE_COLORS.length];
+      if (!g) {
+        g = { key: OTHER_KEY, label: 'Other', color: OTHER_COLOR, members: [], other: true };
+        GROUPS.push(g);
+      }
+    }
+    g.members.push(src);
+    groupBySource[src] = g;
+  });
+  GROUPS.forEach(function (g) {
+    // A lone extra repository keeps its own name; several read as "Other (3)"
+    if (g.other) g.label = g.members.length === 1 ? g.members[0] : 'Other (' + g.members.length + ')';
+  });
+  function groupOf(src) { return groupBySource[src] || null; }
+  function inGroup(src, key) { var g = groupOf(src); return !!g && g.key === key; }
+  function groupTotal(g) {
+    return g.members.reduce(function (sum, src) { return sum + (DATA.totals[DATA.sources.indexOf(src)] || 0); }, 0);
+  }
+  // A repository with no rules yet is usually still being cloned/indexed
+  function groupSyncing(g) {
+    return g.members.some(function (src) {
+      var st = DATA.statuses[DATA.sources.indexOf(src)];
+      return st === 'pending' || st === 'cloning' || st === 'indexing';
+    });
+  }
+  function colorFor(src) { var g = groupOf(src); return g ? g.color : OTHER_COLOR; }
+  function badgeClass(src) { return KNOWN_BADGES.indexOf(src) >= 0 ? 'badge-' + src : 'badge-system'; }
+
+  window._dashPalette = {
+    colorFor: colorFor, types: TYPES, groups: GROUPS,
+    groupOf: groupOf, inGroup: inGroup, badgeClass: badgeClass,
+  };
+
+  var state = { group: null, days: 30 };
+  var tooltip = document.getElementById('dash-tooltip');
+  var insights = document.querySelector('.dash-insights');
+
+  function el(tag, attrs, parent) {
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  function h(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function fmt(n) { return Number(n || 0).toLocaleString(); }
+  function selectedGroup() {
+    for (var i = 0; i < GROUPS.length; i++) if (GROUPS[i].key === state.group) return GROUPS[i];
+    return null;
+  }
+
+  // Tag repository rows with their group color (ties rows to the donut)
+  document.querySelectorAll('.dash-repo-row[data-source]').forEach(function (row) {
+    row.style.setProperty('--src-color', colorFor(row.dataset.source));
+  });
+
+  // ── Tooltip ──────────────────────────────────────────────────────────────
+  function showTip(title, rows, x, y) {
+    tooltip.replaceChildren(h('p', 'dash-tooltip-title', title));
+    rows.forEach(function (r) {
+      var row = h('div', 'dash-tooltip-row');
+      var key = h('span', 'dash-tooltip-key');
+      key.style.background = r.color;
+      row.append(key, h('strong', null, r.value), h('span', null, r.label));
+      tooltip.append(row);
+    });
+    tooltip.hidden = false;
+    var box = insights.getBoundingClientRect();
+    var tw = tooltip.offsetWidth, th = tooltip.offsetHeight;
+    var left = x - box.left + 14, top = y - box.top - th - 10;
+    if (left + tw > box.width) left = x - box.left - tw - 14;
+    if (top < 0) top = y - box.top + 16;
+    tooltip.style.left = left + 'px';
+    tooltip.style.top  = top + 'px';
+  }
+  function hideTip() { tooltip.hidden = true; }
+
+  // ── Selection (shared by donut, legend, chip) ────────────────────────────
+  function select(key) {
+    state.group = (state.group === key) ? null : key;
+    renderDonut();
+    renderActivity();
+    document.querySelectorAll('.dash-repo-row[data-source]').forEach(function (row) {
+      row.classList.toggle('is-highlight', !!state.group && inGroup(row.dataset.source, state.group));
+    });
+    if (window._radarFocus) window._radarFocus(state.group);
+  }
+
+  // ── Donut ────────────────────────────────────────────────────────────────
+  var donutSvg = document.querySelector('#dash-donut svg');
+  var R = 92, r = 60, C = 100;
+
+  function arcPath(a0, a1) {
+    // Full circle needs two arcs; otherwise one outer + one inner arc
+    if (a1 - a0 >= Math.PI * 2 - 1e-6) a1 = a0 + Math.PI * 2 - 1e-4;
+    var large = (a1 - a0) > Math.PI ? 1 : 0;
+    function p(rad, a) { return [C + rad * Math.sin(a), C - rad * Math.cos(a)]; }
+    var o0 = p(R, a0), o1 = p(R, a1), i1 = p(r, a1), i0 = p(r, a0);
+    return 'M' + o0 + 'A' + R + ',' + R + ' 0 ' + large + ' 1 ' + o1 +
+           'L' + i1 + 'A' + r + ',' + r + ' 0 ' + large + ' 0 ' + i0 + 'Z';
+  }
+
+  function setCenter(value, label) {
+    document.getElementById('dash-donut-value').textContent = value;
+    document.getElementById('dash-donut-label').textContent = label;
+  }
+  function centerDefault(total) {
+    var g = selectedGroup();
+    if (g) setCenter(fmt(groupTotal(g)), g.label);
+    else   setCenter(fmt(total), 'rules');
+  }
+
+  function renderDonut() {
+    var total = DATA.totals.reduce(function (a, b) { return a + (b || 0); }, 0);
+    donutSvg.replaceChildren();
+    var legend = document.getElementById('dash-donut-legend');
+    legend.replaceChildren();
+    var a = 0;
+    GROUPS.forEach(function (g) {
+      var n = groupTotal(g);
+      var pct = total ? n / total : 0;
+      var dim = state.group && state.group !== g.key;
+      var on  = state.group === g.key;
+      var memberNote = g.other && g.members.length > 1 ? g.members.join(', ') : '';
+
+      if (n > 0) {
+        var a1 = a + pct * Math.PI * 2, mid = (a + a1) / 2;
+        var path = el('path', {
+          d: arcPath(a, a1), fill: g.color, tabindex: '0', role: 'button',
+          'class': 'dash-donut-slice' + (dim ? ' is-dim' : ''),
+          'aria-label': g.label + ': ' + fmt(n) + ' rules, ' + (pct * 100).toFixed(1) + '%',
+          'aria-pressed': on ? 'true' : 'false',
+        }, donutSvg);
+        // Hover / selected slices pull outward along their own mid-angle
+        var dx = (5 * Math.sin(mid)).toFixed(2), dy = (-5 * Math.cos(mid)).toFixed(2);
+        var out = 'translate(' + dx + 'px,' + dy + 'px)';
+        if (on) path.style.transform = out;
+        path.addEventListener('pointerenter', function () {
+          path.style.transform = out;
+          setCenter(fmt(n), g.label);
+        });
+        path.addEventListener('pointermove', function (e) {
+          var rows = [{ color: g.color, value: fmt(n), label: 'rules · ' + (pct * 100).toFixed(1) + '%' }];
+          if (memberNote) {
+            g.members.forEach(function (src) {
+              rows.push({ color: 'transparent', value: fmt(DATA.totals[DATA.sources.indexOf(src)]), label: src });
+            });
+          }
+          showTip(g.label, rows, e.clientX, e.clientY);
+        });
+        path.addEventListener('pointerleave', function () {
+          if (state.group !== g.key) path.style.transform = '';
+          centerDefault(total);
+          hideTip();
+        });
+        path.addEventListener('click', function () { select(g.key); });
+        path.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(g.key); }
+        });
+        a = a1;
+      }
+
+      // Legend row = direct label + table view
+      var li = document.createElement('li');
+      var btn = h('button', (on ? 'is-active' : '') + (dim ? ' is-dim' : ''));
+      btn.type = 'button';
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      if (memberNote) btn.title = memberNote;
+      var sw = h('span', 'dash-swatch'); sw.style.background = g.color;
+      var syncing = n === 0 && groupSyncing(g);
+      btn.append(sw, h('span', 'dash-legend-name', g.label),
+                 h('span', 'dash-legend-num', syncing ? 'syncing…' : fmt(n)),
+                 h('span', 'dash-legend-pct', total && !syncing ? Math.round(pct * 100) + '%' : '—'));
+      btn.addEventListener('click', function () { select(g.key); });
+      li.append(btn);
+      legend.append(li);
+    });
+    centerDefault(total);
+  }
+
+  // ── Activity chart ───────────────────────────────────────────────────────
+  var chartBox = document.getElementById('dash-activity-chart');
+  var chartSvg = chartBox.querySelector('svg');
+  var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var focusDay = -1;
+
+  function dayList(n) {
+    // Last n days of the server-provided window, as YYYY-MM-DD strings
+    var p = DATA.activity.start.split('-').map(Number);
+    var out = [];
+    for (var i = 0; i < DATA.activity.days; i++) {
+      var d = new Date(Date.UTC(p[0], p[1] - 1, p[2] + i));
+      out.push(d.toISOString().slice(0, 10));
+    }
+    return out.slice(-n);
+  }
+  function dayLabel(iso) {
+    var p = iso.split('-');
+    return MON[Number(p[1]) - 1] + ' ' + Number(p[2]);
+  }
+  // Smallest "nice" integer tick step that fits v in 4 gridlines
+  function niceMax(v) {
+    if (v <= 4) return 4;
+    var raw = v / 4, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    var steps = [1, 2, 3, 5, 10];
+    for (var i = 0; i < steps.length; i++) {
+      if (steps[i] * mag >= raw) return steps[i] * mag * 4;
+    }
+    return 10 * mag * 4;
+  }
+  function topRoundedRect(x, y, w, hgt, rad) {
+    rad = Math.min(rad, w / 2, hgt);
+    return 'M' + x + ',' + (y + hgt) + 'V' + (y + rad) +
+           'Q' + x + ',' + y + ' ' + (x + rad) + ',' + y +
+           'H' + (x + w - rad) + 'Q' + (x + w) + ',' + y + ' ' + (x + w) + ',' + (y + rad) +
+           'V' + (y + hgt) + 'Z';
+  }
+
+  function activityData() {
+    var days = dayList(state.days);
+    var index = {};
+    var buckets = days.map(function (d, i) {
+      index[d] = i;
+      var b = { day: d, total: 0 };
+      TYPES.forEach(function (t) { b[t.key] = 0; });
+      return b;
+    });
+    var typeTotals = {};
+    DATA.activity.rows.forEach(function (row) {
+      var day = row[0], src = row[1], type = row[2], n = row[3];
+      if (!(day in index)) return;
+      if (state.group && !inGroup(src, state.group)) return;
+      var b = buckets[index[day]];
+      if (!(type in b)) return;
+      b[type] += n; b.total += n;
+      typeTotals[type] = (typeTotals[type] || 0) + n;
+    });
+    return { buckets: buckets, typeTotals: typeTotals };
+  }
+
+  function renderActivity(animate) {
+    var d = activityData(), buckets = d.buckets;
+    var W = chartBox.clientWidth, H = chartBox.clientHeight;
+    var m = { l: 32, r: 6, t: 8, b: 22 };
+    var pw = W - m.l - m.r, ph = H - m.t - m.b;
+    var max = 0;
+    buckets.forEach(function (b) { max = Math.max(max, b.total); });
+    var yMax = niceMax(max);
+    var band = pw / buckets.length;
+    var bw = Math.max(2, Math.min(28, band * 0.68));
+    var y = function (v) { return m.t + ph - (v / yMax) * ph; };
+
+    chartSvg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    chartSvg.replaceChildren();
+
+    // Recessive grid + y ticks (integers only)
+    for (var i = 0; i <= 4; i++) {
+      var v = yMax * i / 4, yy = Math.round(y(v)) + 0.5;
+      if (i > 0) el('line', { x1: m.l, x2: W - m.r, y1: yy, y2: yy, 'class': 'dash-grid-line' }, chartSvg);
+      if (v === Math.round(v)) {
+        var t = el('text', { x: m.l - 6, y: yy + 3, 'text-anchor': 'end', 'class': 'dash-axis-text' }, chartSvg);
+        t.textContent = fmt(v);
+      }
+    }
+    el('line', { x1: m.l, x2: W - m.r, y1: m.t + ph + 0.5, y2: m.t + ph + 0.5, 'class': 'dash-baseline' }, chartSvg);
+
+    // X labels: ~6 evenly spaced days, always including the last (today)
+    var every = Math.max(1, Math.ceil(buckets.length / 6));
+    buckets.forEach(function (b, i) {
+      if ((buckets.length - 1 - i) % every !== 0) return;
+      var tx = el('text', { x: m.l + band * i + band / 2, y: H - 6, 'text-anchor': 'middle', 'class': 'dash-axis-text' }, chartSvg);
+      tx.textContent = i === buckets.length - 1 ? 'Today' : dayLabel(b.day);
+    });
+
+    // Bars: one group per day; the hit area is the whole column
+    buckets.forEach(function (b, i) {
+      var g = el('g', { 'class': 'dash-day', 'data-i': i }, chartSvg);
+      el('rect', { x: m.l + band * i, y: m.t, width: band, height: ph, 'class': 'dash-day-hit' }, g);
+      var x = m.l + band * i + (band - bw) / 2;
+      var base = m.t + ph;
+      var stack = el('g', animate ? { 'class': 'dash-bar-grow', style: 'animation-delay:' + Math.min(i * 12, 400) + 'ms' } : {}, g);
+      var present = TYPES.filter(function (t) { return b[t.key] > 0; });
+      present.forEach(function (t, k) {
+        var hgt = (b[t.key] / yMax) * ph;
+        var top = base - hgt;
+        var isTop = k === present.length - 1;
+        el('path', {
+          d: isTop ? topRoundedRect(x, top, bw, hgt, 4) : 'M' + x + ',' + top + 'h' + bw + 'v' + hgt + 'h' + (-bw) + 'Z',
+          fill: t.color, 'class': 'dash-bar-seg',
+        }, stack);
+        base = top;
+      });
+      g.addEventListener('pointerenter', function () { hover(i); });
+      g.addEventListener('pointermove', function (e) { tip(b, e.clientX, e.clientY); });
+      g.addEventListener('pointerleave', function () { hover(-1); hideTip(); });
+    });
+
+    function hover(i) {
+      chartSvg.querySelectorAll('.dash-day').forEach(function (g) {
+        g.classList.toggle('is-hover', Number(g.dataset.i) === i);
+      });
+    }
+    function tip(b, cx, cy) {
+      var rows = TYPES.map(function (t) { return { color: t.color, value: fmt(b[t.key]), label: t.label }; });
+      var g = selectedGroup();
+      showTip(dayLabel(b.day) + (g ? ' · ' + g.label : '') + ' — ' + fmt(b.total) + ' total', rows, cx, cy);
+    }
+
+    // Keyboard: arrow keys walk the days with the same tooltip as hover
+    chartSvg.onkeydown = function (e) {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      focusDay = focusDay < 0 ? buckets.length - 1
+               : Math.max(0, Math.min(buckets.length - 1, focusDay + (e.key === 'ArrowRight' ? 1 : -1)));
+      hover(focusDay);
+      var r = chartSvg.getBoundingClientRect();
+      tip(buckets[focusDay], r.left + (m.l + band * focusDay + band / 2) * r.width / W, r.top + m.t + 20);
+    };
+    chartSvg.onblur = function () { focusDay = -1; hover(-1); hideTip(); };
+
+    // Summary line, empty state, chip, legend
+    var sum = buckets.reduce(function (a, b) { return a + b.total; }, 0);
+    var sel = selectedGroup();
+    var summary = document.getElementById('dash-activity-summary');
+    summary.replaceChildren(h('strong', null, fmt(sum)),
+      ' change' + (sum === 1 ? '' : 's') + ' in the last ' + state.days + ' days' +
+      (sel ? ' for ' + sel.label : ' across all sources'));
+    var empty = document.getElementById('dash-activity-empty');
+    empty.hidden = sum > 0;
+    empty.textContent = 'No rule changes in the last ' + state.days + ' days' + (sel ? ' for ' + sel.label : '');
+
+    var chip = document.getElementById('dash-source-chip');
+    chip.hidden = !sel;
+    if (sel) {
+      var sw = h('span', 'dash-swatch'); sw.style.background = sel.color;
+      chip.replaceChildren(sw, sel.label + ' ✕');
+    }
+
+    var legend = document.getElementById('dash-activity-legend');
+    legend.replaceChildren();
+    TYPES.forEach(function (t) {
+      var li = document.createElement('li');
+      var s = h('span', 'dash-swatch'); s.style.background = t.color;
+      li.append(s, t.label + ' ' + fmt(d.typeTotals[t.key] || 0));
+      legend.append(li);
+    });
+  }
+
+  document.getElementById('dash-source-chip').addEventListener('click', function () { select(state.group); });
+  document.querySelectorAll('.dash-range button').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      state.days = Number(btn.dataset.days);
+      document.querySelectorAll('.dash-range button').forEach(function (b) { b.classList.toggle('active', b === btn); });
+      renderActivity(true);
+    });
+  });
+
+  var resizeTimer;
+  new ResizeObserver(function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () { renderActivity(false); }, 60);
+  }).observe(chartBox);
+
+  // Live updater hook: refresh donut totals while a scan runs
+  window._dashUpdateDonut = function (repos) {
+    repos.forEach(function (repo) {
+      var i = DATA.sources.indexOf(repo.name);
+      if (i >= 0) DATA.totals[i] = repo.total_rules || 0;
+    });
+    renderDonut();
+  };
+
+  renderDonut();
+  renderActivity(true);
+})();
+
 /* ── Dashboard live updater ──────────────────────────────────────────────────
    Hooks into layout.html's existing refreshScanBadge() poll via the
    window._onScanStatus callback.  When a scan is detected, fetches
-   /api/dashboard/stats every 5 s and updates stats + repo cards in place.
+   /api/dashboard/stats every 5 s and updates stats + repo rows in place.
    Zero extra HTTP requests when no scan is running.
    ─────────────────────────────────────────────────────────────────────────── */
 (function () {
@@ -306,33 +1066,29 @@
   var _timer   = null;
   var _prevStatuses = {};
 
-  // ── Format a number with locale thousands separators ─────────────────────
   function fmt(n) {
     return (typeof n === 'number') ? n.toLocaleString() : String(n || 0);
   }
 
-  // ── Toggle a CSS class on/off ─────────────────────────────────────────────
   function setClass(el, cls, on) {
     if (on) { el.classList.add(cls); } else { el.classList.remove(cls); }
   }
 
-  // ── Apply fresh JSON data to the DOM ──────────────────────────────────────
   function applyStats(d) {
-    // Summary bar
     var el;
     el = document.getElementById('dash-stat-rules');  if (el) el.textContent = fmt(d.totals.total_rules);
     el = document.getElementById('dash-stat-events'); if (el) el.textContent = fmt(d.totals.events_7d);
     el = document.getElementById('dash-stat-next');   if (el) el.textContent = d.next_scan_str || '—';
 
-    // Per-repo cards
-    (d.repos || []).forEach(function (repo) {
-      var card = document.getElementById('dash-card-' + repo.name);
-      if (!card) return;
+    if (window._dashUpdateDonut) window._dashUpdateDonut(d.repos || []);
 
-      // Detect layout-changing status transitions and reload to re-render card HTML
-      var prev = _prevStatuses[repo.name] || card.dataset.status;
+    (d.repos || []).forEach(function (repo) {
+      var row = document.getElementById('dash-row-' + repo.name);
+      if (!row) return;
+
+      // These states render a different row body -- reload to re-render it
+      var prev = _prevStatuses[repo.name] || row.dataset.status;
       if (prev && prev !== repo.status) {
-        // These states have a different card body structure — need a full re-render
         var structural = { cloning: 1, pending: 1, error: 1 };
         if (structural[prev] || structural[repo.status]) {
           location.reload();
@@ -340,17 +1096,15 @@
         }
       }
       _prevStatuses[repo.name] = repo.status;
-      card.dataset.status = repo.status;
+      row.dataset.status = repo.status;
 
-      // Status indicator dot
-      var dot = card.querySelector('.dash-status-dot');
+      var dot = row.querySelector('.dash-status-dot');
       if (dot) { dot.className = 'dash-status-dot dash-status-' + repo.status; dot.title = repo.status; }
 
-      // Metric counters (only rendered when status is ready or indexing)
-      var t = card.querySelector('[data-dash="total"]');
-      var n = card.querySelector('[data-dash="new24h"]');
-      var m = card.querySelector('[data-dash="mod24h"]');
-      var s = card.querySelector('[data-dash="last-sync"]');
+      var t = row.querySelector('[data-dash="total"]');
+      var n = row.querySelector('[data-dash="new24h"]');
+      var m = row.querySelector('[data-dash="mod24h"]');
+      var s = row.querySelector('[data-dash="last-sync"]');
 
       if (t) t.textContent = fmt(repo.total_rules);
       if (n) { n.textContent = '+' + (repo.new_24h || 0); setClass(n, 'dash-val-new', repo.new_24h > 0); }
@@ -359,7 +1113,6 @@
     });
   }
 
-  // ── Single poll tick ──────────────────────────────────────────────────────
   function tick() {
     fetch('/api/dashboard/stats')
       .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
@@ -373,14 +1126,420 @@
       .catch(function () {});
   }
 
-  // ── Called by layout.html's refreshScanBadge() every 15 s ────────────────
   window._onScanStatus = function (isScanning) {
+    if (window._radarScanning) window._radarScanning(isScanning);
     if (isScanning && !_timer) {
-      tick();                           // immediate update
-      _timer = setInterval(tick, 5000); // then every 5 s
+      tick();
+      _timer = setInterval(tick, 5000);
     }
   };
 
+})();
+/* ── Radar sweep ─────────────────────────────────────────────────────────────
+   Rule changes from the last 7 days, placed by source sector (same order/
+   colors as the donut) and day ring (newest at the center). Each sector x
+   day cell holds a few individual blips; a cell busier than it has room for
+   (a scan can land hundreds of changes at once) becomes one cluster blip
+   sized by its count. A blip flares as the sweep crosses it and the
+   "Last contact" readout names it -- held for READOUT_HOLD and rotated
+   fairly, so a tight cluster doesn't flicker through names. Sweep speeds up
+   while a scan runs, pauses when off-screen or the tab is hidden, and is
+   static under reduced motion.
+   ─────────────────────────────────────────────────────────────────────────── */
+(function () {
+  'use strict';
+  var dataEl = document.getElementById('dash-data');
+  var root   = document.getElementById('radar');
+  if (!dataEl || !root || !window._dashPalette) return;
+
+  var DATA    = JSON.parse(dataEl.textContent);
+  var PAL     = window._dashPalette;
+  var NS      = 'http://www.w3.org/2000/svg';
+  var R       = 100;                       // outer ring radius (viewBox units)
+  var DAYS    = 7;
+  var MAX_H   = DAYS * 24;
+  var RINGS   = [];                        // one ring per day: 1d ... 7d
+  for (var d = 1; d <= DAYS; d++) RINGS.push({ h: d * 24, label: d + 'd' });
+  var READOUT_HOLD = 2000;                 // ms each "Last contact" stays up
+  var SLOW    = 60, FAST = 160;            // degrees per second (6 s vs ~2.3 s per turn)
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var gridSvg  = root.querySelector('.radar-grid');
+  var blipSvg  = root.querySelector('.radar-blips');
+  var sweepEl  = root.querySelector('.radar-sweep');
+  var tip      = document.getElementById('radar-tooltip');
+  var groups   = PAL.groups;               // one sector per repo; 7th+ share "Other"
+  var sector   = 360 / Math.max(1, groups.length);
+  var LABEL_MAX = 14;                      // longer names are shortened, full name on hover
+  var typeInfo = {};
+  PAL.types.forEach(function (t) { typeInfo[t.key] = t; });
+
+  function el(tag, attrs, parent) {
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  function h(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function pt(r, deg) {
+    var a = deg * Math.PI / 180;
+    return [r * Math.sin(a), -r * Math.cos(a)];
+  }
+  // Equal-AREA day rings (radius ~ sqrt of age): with equal-width rings the
+  // last 24h would get 1/49th of the disc -- far too little for the day
+  // that holds the most activity. Each day gets the same room instead.
+  function radiusFor(hours) {
+    return R * Math.sqrt(Math.min(MAX_H, Math.max(0, hours)) / MAX_H);
+  }
+  function hash(str) {
+    var x = 2166136261;
+    for (var i = 0; i < str.length; i++) { x ^= str.charCodeAt(i); x = Math.imul(x, 16777619); }
+    return ((x >>> 0) % 10000) / 10000;
+  }
+  function ago(hours) {
+    if (hours < 1)  return Math.max(1, Math.round(hours * 60)) + 'm ago';
+    if (hours < 24) return Math.round(hours) + 'h ago';
+    return Math.round(hours / 24) + 'd ago';
+  }
+  function badge(cls, text) { return h('span', 'badge ' + cls, text); }
+  // Absolute time in the app's configured timezone, like every other date
+  function when(iso) {
+    var opts = { dateStyle: 'medium', timeStyle: 'short' };
+    try { return new Date(iso).toLocaleString(undefined, Object.assign({ timeZone: DATA.tz }, opts)); }
+    catch (e) { return new Date(iso).toLocaleString(undefined, opts); }
+  }
+
+  // ── Static grid: rings, spokes, sector arcs + labels ─────────────────────
+  el('circle', { r: R, 'class': 'radar-ring-outer' }, gridSvg);
+  RINGS.forEach(function (ring) {
+    var rr = radiusFor(ring.h);
+    if (ring.h !== MAX_H) el('circle', { r: rr, 'class': 'radar-ring' }, gridSvg);
+    // Labelled down the bottom spoke, away from the sweep's 12 o'clock start
+    var t = el('text', { x: 2, y: rr - 1.5, 'class': 'radar-ring-label' }, gridSvg);
+    t.textContent = ring.label;
+  });
+  var sectorEls = {};
+  groups.forEach(function (g, i) {
+    var a0 = i * sector, a1 = a0 + sector, mid = a0 + sector / 2;
+    var s0 = pt(R, a0);
+    if (groups.length > 1) el('line', { x1: 0, y1: 0, x2: s0[0], y2: s0[1], 'class': 'radar-spoke' }, gridSvg);
+    var pad = Math.min(3, sector / 6);
+    var p0 = pt(R + 3, a0 + pad), p1 = pt(R + 3, a1 - pad);
+    var arc = el('path', {
+      d: 'M' + p0 + 'A' + (R + 3) + ',' + (R + 3) + ' 0 ' + (sector - 2 * pad > 180 ? 1 : 0) + ' 1 ' + p1,
+      stroke: g.color, 'class': 'radar-sector-arc',
+    }, gridSvg);
+    // Anchor the label on the side facing away from the circle, so it grows
+    // outward instead of running back across the ring
+    var sin = Math.sin(mid * Math.PI / 180), cos = Math.cos(mid * Math.PI / 180);
+    var lp = pt(R + 10, mid);
+    var anchor = sin > 0.25 ? 'start' : sin < -0.25 ? 'end' : 'middle';
+    var dy = cos > 0.25 ? -1 : cos < -0.25 ? 6.5 : 2.5;
+    var label = el('text', { x: lp[0].toFixed(2), y: (lp[1] + dy).toFixed(2), 'text-anchor': anchor, 'class': 'radar-sector-label' }, gridSvg);
+    label.textContent = g.label.length > LABEL_MAX ? g.label.slice(0, LABEL_MAX - 1) + '…' : g.label;
+    var full = el('title', {}, label);
+    full.textContent = g.other && g.members.length > 1 ? g.label + ': ' + g.members.join(', ') : g.label;
+    sectorEls[g.key] = [arc, label];
+  });
+
+  // ── Contacts: merge server cells into group x day cells ──────────────────
+  var now = Date.now();
+  var merged = {};
+  DATA.radar.forEach(function (cell) {
+    var grp = PAL.groupOf(cell.source);
+    if (!grp) return;                      // e.g. a repository that was disabled
+    var key = grp.key + '|' + cell.day;
+    var m = merged[key] || (merged[key] = {
+      group: grp, day: cell.day, count: 0, types: {}, latest: cell.latest, contacts: [], sources: [],
+    });
+    m.count += cell.count;
+    for (var t in cell.types) m.types[t] = (m.types[t] || 0) + cell.types[t];
+    if (cell.latest > m.latest) m.latest = cell.latest;
+    m.contacts = m.contacts.concat(cell.contacts);
+    m.sources.push(cell.source);
+  });
+
+  function dayLabel(day) { return day === 0 ? 'last 24h' : day + '–' + (day + 1) + ' days ago'; }
+  function updatesUrl(sources) {
+    var q = new URLSearchParams({ days: '7' });
+    if (sources.length === 1) q.set('source', sources[0]);
+    return DATA.updates_url + '?' + q.toString();
+  }
+
+  var blips = [];
+  function addBlip(b, x, y) {
+    var g = el('g', {
+      'class': 'radar-blip', tabindex: '0', role: 'link',
+      transform: 'translate(' + x.toFixed(2) + ',' + y.toFixed(2) + ')', 'aria-label': b.aria,
+    }, blipSvg);
+    el('circle', { r: Math.max(9, b.size + 4), 'class': 'radar-blip-hit' }, g);
+    b.ping = el('circle', { r: b.size, stroke: b.color, 'class': 'radar-blip-ping', opacity: 0 }, g);
+    if (b.cluster) el('circle', { r: b.size + 2, stroke: b.color, 'class': 'radar-blip-halo' }, g);
+    b.core = el('circle', { r: b.size, fill: b.color, 'class': 'radar-blip-core' }, g);
+    if (b.cluster && b.size >= 5.5) {
+      var t = el('text', { y: 1.8, 'text-anchor': 'middle', 'class': 'radar-blip-count' }, g);
+      t.textContent = b.count > 999 ? Math.round(b.count / 100) / 10 + 'k' : b.count;
+    }
+    b.g = g;
+    b.hit = -1e9;
+    b.shown = 0;
+    g.addEventListener('pointerenter', function () { showTip(b); });
+    g.addEventListener('pointerleave', hideTip);
+    g.addEventListener('focus', function () { showTip(b); });
+    g.addEventListener('blur', hideTip);
+    g.addEventListener('click', function () { window.location = b.url; });
+    g.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.location = b.url; }
+    });
+    blips.push(b);
+  }
+
+  Object.keys(merged).forEach(function (key) {
+    var m = merged[key];
+    var i = groups.indexOf(m.group);
+    var a0 = i * sector, rIn = radiusFor(m.day * 24), rOut = radiusFor((m.day + 1) * 24);
+    var band = rOut - rIn, rMid = (rIn + rOut) / 2;
+    var base = m.day === 0 ? 0.85 : 0.4;
+    // Every cell has the same area, so the same room: ~1 blip per 90 units²
+    var cellArea = (rOut * rOut - rIn * rIn) * (sector * Math.PI / 180) / 2;
+    var room = Math.max(3, Math.min(15, Math.floor(cellArea / 90)));
+
+    if (m.count <= room && m.contacts.length === m.count) {
+      m.contacts.forEach(function (c) {
+        var t = typeInfo[c.change_type] || { color: '#9080b8', label: c.change_type };
+        var hours = (now - Date.parse(c.detected_at)) / 3.6e6;
+        var theta = a0 + sector * (0.1 + 0.8 * hash(c.file_path + '#' + c.id));
+        var r = Math.max(6, rIn + band * (0.15 + 0.7 * hash(c.id + '@' + c.file_path)));
+        var p = pt(r, theta);
+        addBlip({
+          cluster: false, c: c, theta: theta, hours: hours, size: 3, color: t.color, type: t,
+          base: base, group: m.group.key, url: c.history_url,
+          aria: (c.title || c.file_path) + ' — ' + c.source + ', ' + t.label.toLowerCase() + ', ' + ago(hours),
+        }, p[0], p[1]);
+      });
+      return;
+    }
+
+    // Busy cell: one cluster at the cell's center, sized by count (log scale,
+    // capped to fit inside its cell), colored by its most common change type
+    var dominant = Object.keys(m.types).sort(function (a, b) { return m.types[b] - m.types[a]; })[0];
+    var dt = typeInfo[dominant] || { color: '#9080b8', label: dominant };
+    var arcLen = rMid * sector * Math.PI / 180;
+    var maxSize = Math.max(3, 0.42 * Math.min(band, arcLen) - 2);
+    var theta = a0 + sector / 2;
+    var p = pt(rMid, theta);
+    var label = m.sources.length === 1 ? m.sources[0] : m.group.label;
+    addBlip({
+      cluster: true, m: m, count: m.count, theta: theta, label: label,
+      hours: (now - Date.parse(m.latest)) / 3.6e6,
+      size: Math.min(maxSize, 3 + 1.4 * Math.log2(m.count)), color: dt.color,
+      base: base, group: m.group.key, url: updatesUrl(m.sources),
+      aria: m.count + ' changes in ' + label + ', ' + dayLabel(m.day),
+    }, p[0], p[1]);
+  });
+  // Paint oldest first so newer contacts sit on top
+  blips.slice().sort(function (a, b) { return b.hours - a.hours; })
+       .forEach(function (b) { blipSvg.appendChild(b.g); });
+
+  function typeRows(m) {
+    return PAL.types.filter(function (t) { return m.types[t.key]; })
+      .map(function (t) { return [t.color, m.types[t.key].toLocaleString(), t.label]; });
+  }
+
+  // ── Tooltip ──────────────────────────────────────────────────────────────
+  function showTip(b) {
+    var rows;
+    if (b.cluster) {
+      tip.replaceChildren(h('p', 'dash-tooltip-title', b.count.toLocaleString() + ' changes · ' + b.label));
+      rows = typeRows(b.m).concat([['#6a5888', dayLabel(b.m.day), 'click to open Updates']]);
+    } else {
+      tip.replaceChildren(h('p', 'dash-tooltip-title', b.c.title || b.c.file_path));
+      rows = [[b.type.color, b.type.label, b.c.source],
+              ['#6a5888', ago(b.hours), when(b.c.detected_at)]];
+    }
+    rows.forEach(function (r) {
+      var row = h('div', 'dash-tooltip-row');
+      var key = h('span', 'dash-tooltip-key'); key.style.background = r[0];
+      row.append(key, h('strong', null, r[1]), h('span', null, r[2]));
+      tip.append(row);
+    });
+    tip.hidden = false;
+    var box = root.getBoundingClientRect(), gb = b.g.getBoundingClientRect();
+    var x = gb.left + gb.width / 2 - box.left, y = gb.top - box.top;
+    var tw = tip.offsetWidth, th = tip.offsetHeight;
+    var left = Math.max(0, Math.min(box.width - tw, x - tw / 2));
+    var top  = y - th - 8 < 0 ? y + gb.height + 8 : y - th - 8;
+    tip.style.left = left + 'px';
+    tip.style.top  = top + 'px';
+  }
+  function hideTip() { tip.hidden = true; }
+
+  // ── Side panel ───────────────────────────────────────────────────────────
+  var readout = root.parentNode.querySelector('.radar-readout');
+  var total = 0, last24 = 0;
+  Object.keys(merged).forEach(function (k) {
+    total += merged[k].count;
+    if (merged[k].day === 0) last24 += merged[k].count;
+  });
+  document.getElementById('radar-stat-count').textContent = total.toLocaleString();
+  document.getElementById('radar-stat-24h').textContent = last24.toLocaleString();
+  var legend = document.getElementById('radar-legend');
+  PAL.types.forEach(function (t) {
+    var li = document.createElement('li');
+    var sw = h('span', 'dash-swatch'); sw.style.background = t.color; sw.style.borderRadius = '50%';
+    li.append(sw, t.label);
+    legend.append(li);
+  });
+  var clusterKey = document.createElement('li');
+  clusterKey.className = 'radar-legend-cluster';
+  clusterKey.append(h('span', 'radar-cluster-swatch'), 'Cluster (many changes)');
+  legend.append(clusterKey);
+
+  function setContact(b) {
+    var title = document.getElementById('radar-contact-title');
+    var meta  = document.getElementById('radar-contact-meta');
+    if (!b) {
+      title.textContent = 'No contacts in the last 7 days';
+      meta.replaceChildren();
+      return;
+    }
+    var a;
+    if (b.cluster) {
+      a = h('a', null, b.count.toLocaleString() + ' changes in ' + b.label);
+      meta.replaceChildren.apply(meta, PAL.types.filter(function (t) { return b.m.types[t.key]; })
+        .map(function (t) { return badge('badge-' + t.key, b.m.types[t.key].toLocaleString() + ' ' + t.key); })
+        .concat([dayLabel(b.m.day)]));
+    } else {
+      a = h('a', null, b.c.title || b.c.file_path);
+      meta.replaceChildren(badge('badge-' + b.c.change_type, b.c.change_type),
+                           badge(PAL.badgeClass(b.c.source), b.c.source), ago(b.hours));
+    }
+    a.href = b.url;
+    title.replaceChildren(a);
+    readout.classList.remove('is-ping');
+    void readout.offsetWidth;            // restart the ping animation
+    readout.classList.add('is-ping');
+  }
+
+  // ── Focus from the donut ─────────────────────────────────────────────────
+  var focusGroup = null;
+  window._radarFocus = function (key) {
+    focusGroup = key;
+    blips.forEach(function (b) { b.g.classList.toggle('is-dim', !!key && b.group !== key); });
+    groups.forEach(function (g) {
+      sectorEls[g.key].forEach(function (n) { n.classList.toggle('is-dim', !!key && g.key !== key); });
+    });
+  };
+
+  // ── Sweep loop ───────────────────────────────────────────────────────────
+  var angle = 0, speed = SLOW, last = null, raf = null;
+  var paused = false, onScreen = true, scanning = false;
+  var contactAt = -1e9;                    // when the readout last changed
+  var sweepStat = document.getElementById('radar-stat-sweep');
+
+  function updateSweepStat() {
+    sweepStat.textContent = reduced ? 'Off' : paused ? 'Paused' : scanning ? 'Scanning' : (360 / SLOW) + 's / turn';
+  }
+
+  function crossed(from, to, a) {
+    return from <= to ? (a > from && a <= to) : (a > from || a <= to);
+  }
+
+  function frame(ts) {
+    raf = null;
+    if (last == null) last = ts;
+    var dt = Math.min(0.1, (ts - last) / 1000);
+    last = ts;
+    // Ease toward the target speed so a scan starting/finishing feels smooth
+    speed += ((scanning ? FAST : SLOW) - speed) * Math.min(1, dt * 2);
+    var prev = angle;
+    angle = (angle + speed * dt) % 360;
+    sweepEl.style.transform = 'rotate(' + angle.toFixed(2) + 'deg)';
+
+    // Readout: once the hold has passed, name the next crossed contact that
+    // has been named the fewest times -- so successive turns walk through a
+    // cluster instead of re-announcing its first blip every time.
+    var canName = ts - contactAt >= READOUT_HOLD;
+    var minShown = Infinity;
+    if (canName) {
+      blips.forEach(function (b) {
+        if (!focusGroup || b.group === focusGroup) minShown = Math.min(minShown, b.shown);
+      });
+    }
+    var pick = null;
+    blips.forEach(function (b) {
+      if (crossed(prev, angle, b.theta)) {
+        b.hit = ts;
+        if (canName && b.shown === minShown && (!focusGroup || b.group === focusGroup)) {
+          if (!pick || b.hours < pick.hours) pick = b;
+        }
+      }
+      var I = Math.exp(-(ts - b.hit) / 1600);
+      b.core.setAttribute('opacity', (b.base + (1 - b.base) * I).toFixed(3));
+      b.core.setAttribute('r', (b.size + 1.6 * I).toFixed(2));
+      if (I > 0.02) {
+        b.ping.setAttribute('r', (b.size + 13 * (1 - I)).toFixed(2));
+        b.ping.setAttribute('opacity', (0.75 * I).toFixed(3));
+      } else if (b.ping.getAttribute('opacity') !== '0') {
+        b.ping.setAttribute('opacity', '0');
+      }
+    });
+    if (pick) {
+      pick.shown++;
+      contactAt = ts;
+      setContact(pick);
+    }
+    schedule();
+  }
+
+  function schedule() {
+    if (raf == null && !reduced && !paused && onScreen && !document.hidden) {
+      raf = requestAnimationFrame(frame);
+    }
+  }
+  function stop() {
+    if (raf != null) cancelAnimationFrame(raf);
+    raf = null;
+    last = null;
+  }
+
+  window._radarScanning = function (on) {
+    scanning = !!on;
+    updateSweepStat();
+  };
+
+  var pauseBtn = document.getElementById('radar-pause');
+  pauseBtn.addEventListener('click', function () {
+    paused = !paused;
+    pauseBtn.textContent = paused ? '▶ Resume sweep' : '❚❚ Pause sweep';
+    pauseBtn.setAttribute('aria-pressed', paused ? 'true' : 'false');
+    updateSweepStat();
+    if (paused) stop(); else schedule();
+  });
+
+  new IntersectionObserver(function (entries) {
+    onScreen = entries[0].isIntersecting;
+    if (onScreen) schedule(); else stop();
+  }).observe(root);
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) stop(); else schedule();
+  });
+
+  if (reduced) {
+    // No motion: every contact shown at full strength, newest named
+    pauseBtn.hidden = true;
+    blips.forEach(function (b) { b.core.setAttribute('opacity', '0.9'); });
+  }
+  var first = blips.length ? blips.reduce(function (a, b) { return b.hours < a.hours ? b : a; }) : null;
+  if (first) { first.shown++; contactAt = performance.now(); }
+  setContact(first);
+  updateSweepStat();
+  schedule();
 })();
 </script>
 

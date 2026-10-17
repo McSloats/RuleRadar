@@ -581,6 +581,59 @@ def _relative_time(ts_iso: str) -> str:
         return ts_iso[:16].replace("T", " ") + " UTC"
 
 
+def _change_activity(days: int = 90) -> dict:
+    """
+    Daily rule-change counts for the dashboard activity chart, bucketed by
+    day in the display timezone (matching every other date shown in the app).
+    Returns {"start": first day, "days": N, "rows": [[day, source, type, n]]}.
+    """
+    tz        = _get_display_tz()
+    today     = datetime.now(tz).date()
+    start     = today - timedelta(days=days - 1)
+    start_utc = datetime.combine(start, datetime.min.time(), tz).astimezone(timezone.utc)
+
+    counts: dict[tuple[str, str, str], int] = {}
+    for minute, source, change_type, n in db.get_change_activity(
+        start_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+    ):
+        day = datetime.fromisoformat(minute + "+00:00").astimezone(tz).date().isoformat()
+        key = (day, source, change_type)
+        counts[key] = counts.get(key, 0) + n
+
+    return {
+        "start": start.isoformat(),
+        "days":  days,
+        "rows":  [[d, s, t, n] for (d, s, t), n in sorted(counts.items())],
+    }
+
+
+def _radar_cells(now: datetime, days: int = 7, per_cell: int = 15) -> list[dict]:
+    """
+    Rule changes from the last `days` days for the dashboard radar, grouped
+    into cells of (source, day ring) where ring 0 = the last 24 hours.
+
+    A single scan can record hundreds of changes with the same timestamp, so
+    every cell carries its full count and per-type breakdown, plus up to
+    `per_cell` newest individual contacts. The radar draws a sparse cell as
+    individual blips and a busy one as a single cluster -- nothing is dropped.
+    """
+    since = (now - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cells: dict[tuple[str, int], dict] = {}
+    for c in db.get_recent_rule_changes(limit=50000, since=since):
+        detected = datetime.fromisoformat(c["detected_at"].replace("Z", "+00:00"))
+        day      = min(days - 1, max(0, int((now - detected).total_seconds() // 86400)))
+        cell     = cells.setdefault((c["source"], day), {
+            "source": c["source"], "day": day, "count": 0, "types": {},
+            "latest": c["detected_at"], "contacts": [],
+        })
+        cell["count"] += 1
+        cell["types"][c["change_type"]] = cell["types"].get(c["change_type"], 0) + 1
+        if len(cell["contacts"]) < per_cell:   # rows arrive newest first
+            c["history_url"] = url_for("history", source=c["source"], file_path=c["file_path"])
+            cell["contacts"].append(c)
+    return list(cells.values())
+
+
 @app.route("/dashboard")
 @login_required
 def dashboard():
@@ -608,6 +661,8 @@ def dashboard():
         repos=repos,
         totals=totals,
         next_scan_str=next_scan_str,
+        activity=_change_activity(),
+        radar=_radar_cells(now),
     )
 
 
