@@ -640,10 +640,9 @@ def dashboard():
     """Post-login overview: per-repo cards and aggregate summary stats."""
     now     = datetime.now(timezone.utc)
     cut_24h = (now - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    cut_7d  = (now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     repos  = db.get_dashboard_repo_stats(cut_24h)
-    totals = db.get_dashboard_totals(cut_7d)
+    totals = db.get_dashboard_totals(now.strftime("%Y-%m-%dT%H:%M:%SZ"))
 
     # Annotate repos with a human-readable last-sync string
     for repo in repos:
@@ -663,6 +662,7 @@ def dashboard():
         next_scan_str=next_scan_str,
         activity=_change_activity(),
         radar=_radar_cells(now),
+        scan_status=db.get_scan_status(),
     )
 
 
@@ -1529,10 +1529,9 @@ def api_dashboard_stats():
     """
     now     = datetime.now(timezone.utc)
     cut_24h = (now - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    cut_7d  = (now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     repos  = db.get_dashboard_repo_stats(cut_24h)
-    totals = db.get_dashboard_totals(cut_7d)
+    totals = db.get_dashboard_totals(now.strftime("%Y-%m-%dT%H:%M:%SZ"))
 
     for repo in repos:
         repo["last_sync_rel"] = _relative_time(repo.get("last_synced_at", ""))
@@ -1550,6 +1549,7 @@ def api_dashboard_stats():
         "totals":        totals,
         "next_scan_str": next_scan_str,
         "is_scanning":   bool(status.get("is_scanning")),
+        "last_scan":     status.get("last_scan") or "",
     })
 
 

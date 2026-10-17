@@ -7,21 +7,84 @@
   <h2>Dashboard</h2>
 </div>
 
-{# ── Summary stats bar ────────────────────────────────────────────────────── #}
-<div class="dash-stats-bar">
-  <div class="dash-stat-card">
-    <p class="dash-stat-value" id="dash-stat-rules">{{ "{:,}".format(totals.total_rules) }}</p>
-    <p class="dash-stat-label">Rules Tracked</p>
-  </div>
-  <div class="dash-stat-card">
-    <p class="dash-stat-value" id="dash-stat-events">{{ "{:,}".format(totals.events_7d) }}</p>
-    <p class="dash-stat-label">Changes (last 7 days)</p>
-  </div>
-  <div class="dash-stat-card">
-    <p class="dash-stat-value" id="dash-stat-next">{{ next_scan_str }}</p>
-    <p class="dash-stat-label">Next Scheduled Scan</p>
-  </div>
+{# ── Summary tiles: each number with its context ─────────────────────────── #}
+<div class="dash-tiles">
+  <section class="dash-tile" aria-labelledby="dash-tile-rules-label">
+    <div class="dash-tile-head">
+      <span class="dash-tile-label" id="dash-tile-rules-label">Rules tracked</span>
+      <a class="dash-tile-link" href="{{ url_for('detections') }}">Detections →</a>
+    </div>
+    <p class="dash-tile-value" id="dash-stat-rules">{{ "{:,}".format(totals.total_rules) }}</p>
+    <p class="dash-tile-sub" id="dash-tile-rules-sub"></p>
+    <div class="dash-tile-bar" id="dash-tile-sources"></div>
+  </section>
+
+  <section class="dash-tile" aria-labelledby="dash-tile-changes-label">
+    <div class="dash-tile-head">
+      <span class="dash-tile-label" id="dash-tile-changes-label">Changes · 7 days</span>
+      <a class="dash-tile-link" href="{{ url_for('updates', days=7) }}">Updates →</a>
+    </div>
+    <p class="dash-tile-value">
+      <span id="dash-stat-events">{{ "{:,}".format(totals.events_7d) }}</span>
+      <span class="dash-tile-delta" id="dash-tile-delta"></span>
+    </p>
+    <p class="dash-tile-sub" id="dash-tile-changes-sub"></p>
+    <svg class="dash-tile-spark" id="dash-tile-spark" role="img" aria-label="Changes per day, last 7 days"></svg>
+  </section>
+
+  <section class="dash-tile dash-tile-scan" aria-labelledby="dash-tile-scan-label">
+    <div class="dash-tile-head">
+      <span class="dash-tile-label" id="dash-tile-scan-label">Next scan</span>
+      {% if current_user.is_admin %}
+      <a class="dash-tile-link" href="{{ url_for('admin') }}">Scan controls →</a>
+      {% endif %}
+    </div>
+    <div class="dash-tile-scan-body">
+      <div>
+        <p class="dash-tile-value dash-tile-countdown" id="dash-stat-next">{{ next_scan_str }}</p>
+        <p class="dash-tile-sub" id="dash-tile-scan-sub"></p>
+      </div>
+      <svg class="dash-tile-ring" id="dash-tile-ring" viewBox="0 0 64 64" role="img" aria-label="Progress toward the next scan">
+        <circle class="dash-ring-track" cx="32" cy="32" r="26"></circle>
+        <circle class="dash-ring-fill" id="dash-ring-fill" cx="32" cy="32" r="26"
+                transform="rotate(-90 32 32)" pathLength="100" stroke-dasharray="0 100"></circle>
+        <text class="dash-ring-text" id="dash-ring-text" x="32" y="36" text-anchor="middle"></text>
+      </svg>
+    </div>
+  </section>
 </div>
+
+{# ── Radar sweep: recent rule changes as contacts ─────────────────────────── #}
+{% if repos %}
+<section class="dash-panel dash-radar-panel" aria-labelledby="dash-radar-title">
+  <div class="dash-panel-head">
+    <h3 class="dash-panel-title" id="dash-radar-title">Radar</h3>
+    <span class="dash-panel-hint">Rule changes from the last 7 days · one ring per day, newest at the center · click a blip for its history, or a cluster for Updates</span>
+  </div>
+  <div class="radar-layout">
+    <div class="radar" id="radar">
+      <svg class="radar-grid" viewBox="-150 -150 300 300" aria-hidden="true"></svg>
+      <div class="radar-sweep" aria-hidden="true"></div>
+      <svg class="radar-blips" viewBox="-150 -150 300 300" role="group" aria-label="Recent rule changes"></svg>
+      <div class="dash-tooltip" id="radar-tooltip" role="tooltip" hidden></div>
+    </div>
+    <div class="radar-side">
+      <div class="radar-readout" aria-live="off">
+        <p class="radar-readout-label">Last contact</p>
+        <p class="radar-readout-title" id="radar-contact-title">Scanning…</p>
+        <p class="radar-readout-meta" id="radar-contact-meta"></p>
+      </div>
+      <dl class="radar-stats">
+        <div><dt>Contacts</dt><dd id="radar-stat-count">0</dd></div>
+        <div><dt>Last 24h</dt><dd id="radar-stat-24h">0</dd></div>
+        <div><dt>Sweep</dt><dd id="radar-stat-sweep">Idle</dd></div>
+      </dl>
+      <ul class="dash-legend dash-legend-inline" id="radar-legend"></ul>
+      <button type="button" class="dash-chip radar-pause" id="radar-pause" aria-pressed="false">❚❚ Pause sweep</button>
+    </div>
+  </div>
+</section>
+{% endif %}
 
 {# ── Charts: rules by source + change activity ───────────────────────────── #}
 {% if repos %}
@@ -65,38 +128,6 @@
 
   <div class="dash-tooltip" id="dash-tooltip" role="tooltip" hidden></div>
 </div>
-{% endif %}
-
-{# ── Radar sweep: recent rule changes as contacts ─────────────────────────── #}
-{% if repos %}
-<section class="dash-panel dash-radar-panel" aria-labelledby="dash-radar-title">
-  <div class="dash-panel-head">
-    <h3 class="dash-panel-title" id="dash-radar-title">Radar</h3>
-    <span class="dash-panel-hint">Rule changes from the last 7 days · one ring per day, newest at the center · click a blip for its history, or a cluster for Updates</span>
-  </div>
-  <div class="radar-layout">
-    <div class="radar" id="radar">
-      <svg class="radar-grid" viewBox="-150 -150 300 300" aria-hidden="true"></svg>
-      <div class="radar-sweep" aria-hidden="true"></div>
-      <svg class="radar-blips" viewBox="-150 -150 300 300" role="group" aria-label="Recent rule changes"></svg>
-      <div class="dash-tooltip" id="radar-tooltip" role="tooltip" hidden></div>
-    </div>
-    <div class="radar-side">
-      <div class="radar-readout" aria-live="off">
-        <p class="radar-readout-label">Last contact</p>
-        <p class="radar-readout-title" id="radar-contact-title">Scanning…</p>
-        <p class="radar-readout-meta" id="radar-contact-meta"></p>
-      </div>
-      <dl class="radar-stats">
-        <div><dt>Contacts</dt><dd id="radar-stat-count">0</dd></div>
-        <div><dt>Last 24h</dt><dd id="radar-stat-24h">0</dd></div>
-        <div><dt>Sweep</dt><dd id="radar-stat-sweep">Idle</dd></div>
-      </dl>
-      <ul class="dash-legend dash-legend-inline" id="radar-legend"></ul>
-      <button type="button" class="dash-chip radar-pause" id="radar-pause" aria-pressed="false">❚❚ Pause sweep</button>
-    </div>
-  </div>
-</section>
 {% endif %}
 
 {# ── Repository rows ──────────────────────────────────────────────────────── #}
@@ -188,35 +219,82 @@
 {% endif %}
 
 <style>
-/* ── Dashboard summary bar ──────────────────────────────────────────────── */
-.dash-stats-bar {
-  display: flex;
+/* ── Summary tiles ───────────────────────────────────────────────────────── */
+.dash-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1rem;
   margin-bottom: 1.5rem;
-  flex-wrap: wrap;
 }
-.dash-stat-card {
-  flex: 1;
-  min-width: 160px;
+@media (max-width: 900px) {
+  .dash-tiles { grid-template-columns: 1fr; }
+}
+.dash-tile {
   background: #160f2a;
   border: 1px solid #2b1e4a;
   border-radius: 8px;
-  padding: 1.1rem 1.4rem;
-  text-align: center;
+  padding: 1rem 1.2rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
 }
-.dash-stat-value {
-  font-size: 2rem;
+.dash-tile-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
+.dash-tile-label {
+  font-size: 0.7rem;
+  color: #9080b8;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+.dash-tile-link { font-size: 0.72rem; color: #6a5888; text-decoration: none; white-space: nowrap; }
+.dash-tile-link:hover { color: #d4a017; }
+.dash-tile-value {
+  font-size: 1.9rem;
   font-weight: 700;
   color: #d4a017;
-  margin: 0 0 0.25rem;
   letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin: 0.15rem 0 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
 }
-.dash-stat-label {
-  font-size: 0.75rem;
-  color: #6a5888;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin: 0;
+.dash-tile-delta { font-size: 0.8rem; font-weight: 600; color: #c8bfe0; letter-spacing: 0; }
+.dash-tile-sub { font-size: 0.76rem; color: #9080b8; margin: 0; min-height: 1.1em; }
+.dash-tile-sub strong { color: #ede8f5; font-weight: 600; }
+
+/* Rules: one thin bar split by source, same colors as the donut */
+.dash-tile-bar { display: flex; gap: 2px; height: 6px; margin-top: auto; padding-top: 0.5rem; box-sizing: content-box; }
+.dash-tile-bar span { border-radius: 2px; min-width: 3px; transition: opacity 0.15s; }
+.dash-tile-bar:hover span { opacity: 0.55; }
+.dash-tile-bar span:hover { opacity: 1; }
+
+/* Changes: 7-day sparkline */
+.dash-tile-spark { width: 100%; height: 30px; margin-top: auto; display: block; overflow: visible; }
+.dash-spark-bar { fill: #3d2b66; }
+.dash-spark-bar.is-today { fill: #d4a017; }
+.dash-spark-hit { fill: transparent; }
+.dash-spark-day:hover .dash-spark-bar { fill: #9080b8; }
+.dash-spark-day:hover .dash-spark-bar.is-today { fill: #f0c040; }
+.dash-spark-base { stroke: #2b1e4a; stroke-width: 1; }
+
+/* Next scan: live countdown + ring filling across the 2h cycle */
+.dash-tile-scan-body { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-top: -0.35rem; }
+.dash-tile-countdown { font-variant-numeric: tabular-nums; }
+.dash-tile-ring { width: 64px; height: 64px; flex-shrink: 0; }
+.dash-ring-track { fill: none; stroke: #2b1e4a; stroke-width: 5; }
+.dash-ring-fill { fill: none; stroke: #d4a017; stroke-width: 5; stroke-linecap: round; transition: stroke-dasharray 0.9s linear; }
+.dash-ring-text { font-size: 12px; font-weight: 700; fill: #ede8f5; font-variant-numeric: tabular-nums; }
+.dash-tile-scan.is-scanning .dash-ring-fill {
+  stroke-dasharray: 22 78 !important;
+  transform-origin: 32px 32px;
+  animation: dash-ring-spin 1.1s linear infinite;
+}
+@keyframes dash-ring-spin { from { transform: rotate(-90deg); } to { transform: rotate(270deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .dash-ring-fill { transition: none; }
+  .dash-tile-scan.is-scanning .dash-ring-fill { animation: none; }
 }
 
 /* ── Panels (charts + repository list) ───────────────────────────────────── */
@@ -616,8 +694,6 @@
   }
 }
 @media (max-width: 600px) {
-  .dash-stats-bar { flex-direction: column; }
-  .dash-stat-card { min-width: 0; }
   .dash-repo-row { padding: 0.75rem 0.9rem; }
 }
 </style>
@@ -630,6 +706,9 @@
   "activity": activity,
   "radar":    radar,
   "updates_url": url_for("updates"),
+  "totals_now": totals,
+  "last_scan":  scan_status.last_scan or "",
+  "scanning":   scan_status.is_scanning | int,
   "tz":       app_tz_name,
 } | tojson }}</script>
 {% endif %}
@@ -1078,7 +1157,7 @@
     var el;
     el = document.getElementById('dash-stat-rules');  if (el) el.textContent = fmt(d.totals.total_rules);
     el = document.getElementById('dash-stat-events'); if (el) el.textContent = fmt(d.totals.events_7d);
-    el = document.getElementById('dash-stat-next');   if (el) el.textContent = d.next_scan_str || '—';
+    if (window._dashUpdateTiles) window._dashUpdateTiles(d.totals, d.last_scan, d.repos);
 
     if (window._dashUpdateDonut) window._dashUpdateDonut(d.repos || []);
 
@@ -1128,6 +1207,7 @@
 
   window._onScanStatus = function (isScanning) {
     if (window._radarScanning) window._radarScanning(isScanning);
+    if (window._tilesScanning) window._tilesScanning(isScanning);
     if (isScanning && !_timer) {
       tick();
       _timer = setInterval(tick, 5000);
@@ -1540,6 +1620,147 @@
   setContact(first);
   updateSweepStat();
   schedule();
+})();
+/* ── Summary tiles ───────────────────────────────────────────────────────────
+   Rules: +new / -deleted this week and a bar split by source (donut colors).
+   Changes: count vs the 7 days before, plus a 7-day sparkline.
+   Next scan: live countdown to the next even UTC hour (the scheduler's
+   cycle) with a ring filling across the 2-hour interval.
+   ─────────────────────────────────────────────────────────────────────────── */
+(function () {
+  'use strict';
+  var dataEl = document.getElementById('dash-data');
+  var DATA   = dataEl ? JSON.parse(dataEl.textContent) : {};
+  var PAL    = window._dashPalette;
+  var NS     = 'http://www.w3.org/2000/svg';
+  var CYCLE  = 2 * 3600 * 1000;            // scheduler fires every 2 hours
+  var totals = DATA.totals_now || null;
+  var lastScan = DATA.last_scan || '';
+  var scanning = !!DATA.scanning;
+
+  function fmt(n) { return Number(n || 0).toLocaleString(); }
+  function h(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function svg(tag, attrs, parent) {
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  function ago(iso) {
+    if (!iso) return 'never';
+    var m = Math.round((Date.now() - Date.parse(iso)) / 60000);
+    if (m < 1)  return 'just now';
+    if (m < 60) return m + 'm ago';
+    if (m < 1440) return Math.round(m / 60) + 'h ago';
+    return Math.round(m / 1440) + 'd ago';
+  }
+
+  // ── Rules tile ───────────────────────────────────────────────────────────
+  function renderRules() {
+    var sub = document.getElementById('dash-tile-rules-sub');
+    if (!totals) return;
+    var parts = [h('strong', null, '+' + fmt(totals.new_7d)), ' new this week'];
+    if (totals.deleted_7d) parts.push(' · ', h('strong', null, '−' + fmt(totals.deleted_7d)), ' deleted');
+    sub.replaceChildren.apply(sub, parts);
+
+    var bar = document.getElementById('dash-tile-sources');
+    bar.replaceChildren();
+    if (!PAL || !DATA.totals) return;
+    var all = DATA.totals.reduce(function (a, b) { return a + (b || 0); }, 0);
+    PAL.groups.forEach(function (g) {
+      var n = g.members.reduce(function (a, src) { return a + (DATA.totals[DATA.sources.indexOf(src)] || 0); }, 0);
+      if (!n) return;
+      var seg = h('span');
+      seg.style.flex = String(n);
+      seg.style.background = g.color;
+      seg.title = g.label + ': ' + fmt(n) + ' rules (' + Math.round(n / all * 100) + '%)';
+      bar.append(seg);
+    });
+    bar.setAttribute('role', 'img');
+    bar.setAttribute('aria-label', 'Rules by source: ' + Array.prototype.map.call(bar.children, function (c) { return c.title; }).join('; '));
+  }
+
+  // ── Changes tile ─────────────────────────────────────────────────────────
+  function renderChanges() {
+    if (!totals) return;
+    var cur = totals.events_7d, prev = totals.events_prev_7d;
+    var delta = document.getElementById('dash-tile-delta');
+    var diff = cur - prev;
+    // Neutral ink: more changes isn't good or bad, just more activity
+    delta.textContent = diff === 0 ? '— same' : (diff > 0 ? '▲ +' : '▼ −') + fmt(Math.abs(diff));
+    var sub = document.getElementById('dash-tile-changes-sub');
+    sub.replaceChildren('vs ', h('strong', null, fmt(prev)), ' in the 7 days before');
+
+    var spark = document.getElementById('dash-tile-spark');
+    var days = totals.daily_7d || [];
+    var W = spark.clientWidth || 240, H = 30;
+    spark.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    spark.replaceChildren();
+    var max = Math.max.apply(null, days.concat([1]));
+    var band = W / days.length, bw = Math.max(4, band - 4);
+    days.forEach(function (n, i) {
+      var g = svg('g', { 'class': 'dash-spark-day' }, spark);
+      var bh = n ? Math.max(2, (n / max) * (H - 2)) : 0;
+      var x = i * band + (band - bw) / 2;
+      svg('rect', { x: i * band, y: 0, width: band, height: H, 'class': 'dash-spark-hit' }, g);
+      if (bh) svg('rect', { x: x, y: H - bh, width: bw, height: bh, rx: 2,
+                            'class': 'dash-spark-bar' + (i === days.length - 1 ? ' is-today' : '') }, g);
+      var label = i === days.length - 1 ? 'Last 24h' : (days.length - 1 - i) + '–' + (days.length - i) + ' days ago';
+      svg('title', {}, g).textContent = label + ': ' + fmt(n) + ' change' + (n === 1 ? '' : 's');
+    });
+    svg('line', { x1: 0, x2: W, y1: H - 0.5, y2: H - 0.5, 'class': 'dash-spark-base' }, spark);
+  }
+
+  // ── Next-scan tile ───────────────────────────────────────────────────────
+  var tile = document.querySelector('.dash-tile-scan');
+  var valueEl = document.getElementById('dash-stat-next');
+  var fill = document.getElementById('dash-ring-fill');
+  var ringText = document.getElementById('dash-ring-text');
+  var scanSub = document.getElementById('dash-tile-scan-sub');
+
+  function tick() {
+    tile.classList.toggle('is-scanning', scanning);
+    scanSub.replaceChildren('last scan ', h('strong', null, ago(lastScan)), ' · every 2h');
+    if (scanning) {
+      valueEl.textContent = 'Scanning…';
+      ringText.textContent = '';
+      return;
+    }
+    var now = Date.now();
+    var next = Math.ceil((now + 1) / CYCLE) * CYCLE;   // next even UTC hour
+    var left = next - now;
+    var s = Math.floor(left / 1000);
+    var hh = Math.floor(s / 3600), mm = Math.floor(s % 3600 / 60), ss = s % 60;
+    valueEl.textContent = (hh ? hh + 'h ' : '') + String(mm).padStart(hh ? 2 : 1, '0') + 'm ' + String(ss).padStart(2, '0') + 's';
+    var pct = Math.round((1 - left / CYCLE) * 100);
+    fill.setAttribute('stroke-dasharray', pct + ' ' + (100 - pct));
+    ringText.textContent = pct + '%';
+  }
+
+  window._tilesScanning = function (on) { scanning = !!on; tick(); };
+  window._dashUpdateTiles = function (t, last, repos) {
+    if (t) totals = t;
+    if (last) lastScan = last;
+    (repos || []).forEach(function (repo) {
+      var i = (DATA.sources || []).indexOf(repo.name);
+      if (i >= 0) DATA.totals[i] = repo.total_rules || 0;
+    });
+    renderRules();
+    renderChanges();
+    tick();
+  };
+
+  renderRules();
+  renderChanges();
+  tick();
+  setInterval(tick, 1000);
+  var rt;
+  window.addEventListener('resize', function () { clearTimeout(rt); rt = setTimeout(renderChanges, 100); });
 })();
 </script>
 

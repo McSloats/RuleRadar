@@ -468,20 +468,45 @@ def get_dashboard_repo_stats(cutoff_24h: str) -> list[dict]:
     return result
 
 
-def get_dashboard_totals(cutoff_7d: str) -> dict:
+def get_dashboard_totals(now_iso: str) -> dict:
     """
-    Aggregate stats across all repos for the dashboard summary bar.
-    Returns total_rules and events_7d (all change types).
+    Aggregate stats across all repos for the dashboard summary tiles.
+    Days are rolling 24h windows back from `now_iso` (window 0 = last 24h).
+
+      total_rules     -- detections indexed right now
+      events_7d       -- change events (all types) in the last 7 days
+      events_prev_7d  -- change events in the 7 days before that
+      daily_7d        -- per-day counts for the last 7 days, oldest first
+      new_7d / deleted_7d -- 'new' and 'deleted' events in the last 7 days
     """
+    now     = datetime.fromisoformat(now_iso.replace("Z", "+00:00"))
+    cut_14d = (now - timedelta(days=14)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    daily   = [0] * 14
+    new_7d = deleted_7d = 0
     with get_conn() as conn:
-        total_rules = conn.execute(
-            "SELECT COUNT(*) FROM detections"
-        ).fetchone()[0]
-        events_7d = conn.execute(
-            "SELECT COUNT(*) FROM updates WHERE detected_at >= ?",
-            (cutoff_7d,),
-        ).fetchone()[0]
-    return {"total_rules": total_rules, "events_7d": events_7d}
+        total_rules = conn.execute("SELECT COUNT(*) FROM detections").fetchone()[0]
+        rows = conn.execute(
+            "SELECT CAST(julianday(?) - julianday(detected_at) AS INTEGER) AS d,"
+            "       change_type, COUNT(*)"
+            " FROM updates WHERE detected_at >= ? GROUP BY d, change_type",
+            (now_iso, cut_14d),
+        ).fetchall()
+    for d, change_type, n in rows:
+        d = min(13, max(0, d))
+        daily[d] += n
+        if d < 7:
+            if change_type == "new":
+                new_7d += n
+            elif change_type == "deleted":
+                deleted_7d += n
+    return {
+        "total_rules":    total_rules,
+        "events_7d":      sum(daily[:7]),
+        "events_prev_7d": sum(daily[7:]),
+        "daily_7d":       daily[:7][::-1],
+        "new_7d":         new_7d,
+        "deleted_7d":     deleted_7d,
+    }
 
 
 def get_change_activity(cutoff: str) -> list[tuple[str, str, str, int]]:
