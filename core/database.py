@@ -972,6 +972,50 @@ def get_recent_rule_changes(limit: int = 5) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def suggest_rules(q: str, scope: str = "detections", limit: int = 8) -> list[dict]:
+    """
+    Title matches for the live search dropdown, prefix matches first.
+
+    - detections : current rules
+    - updates    : rules with at least one change event (latest change first)
+    - history    : current rules plus rules only known from the change log
+                   (e.g. deleted), since those still have history
+    """
+    esc      = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    contains = f"%{esc}%"
+    prefix   = f"{esc}%"
+    like     = "title LIKE ? ESCAPE '\\'"
+
+    if scope == "updates":
+        sql = (
+            "SELECT title, source, file_path, change_type, MAX(detected_at) AS detected_at"
+            f" FROM updates WHERE {like}"
+            " GROUP BY source, file_path"
+            f" ORDER BY ({like}) DESC, detected_at DESC LIMIT ?"
+        )
+        params = [contains, prefix, limit]
+    elif scope == "history":
+        sql = (
+            "SELECT title, source, file_path FROM ("
+            f"  SELECT title, source, file_path FROM detections WHERE {like}"
+            "   UNION"
+            f"  SELECT title, source, file_path FROM updates WHERE {like}"
+            ")"
+            f" GROUP BY source, file_path ORDER BY ({like}) DESC, title LIMIT ?"
+        )
+        params = [contains, contains, prefix, limit]
+    else:
+        sql = (
+            f"SELECT title, source, file_path FROM detections WHERE {like}"
+            f" ORDER BY ({like}) DESC, title LIMIT ?"
+        )
+        params = [contains, prefix, limit]
+
+    with get_conn() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [dict(r) for r in rows]
+
+
 def count_rule_modifications(rules: list[tuple[str, str]]) -> dict[tuple[str, str], int]:
     """Return {(source, file_path): modification count} for the given rules —
     the same events the History page lists. Rules with none are omitted."""

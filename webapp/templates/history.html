@@ -11,8 +11,11 @@
 {# ── Rule picker ── #}
 <form method="get" action="{{ url_for('history') }}" class="filter-bar">
   <div class="filter-bar-main">
-    <input type="text" name="q" value="{{ q }}"
-           placeholder="Search by title to select a rule…" class="filter-search-input">
+    <div class="suggest-wrap">
+      <input type="text" name="q" value="{{ q }}"
+             placeholder="Search by title to select a rule…" class="filter-search-input"
+             autocomplete="off" data-suggest="history" data-suggest-navigate>
+    </div>
     <button type="submit" class="btn btn-primary">Search</button>
     {% if source or q %}
       <a href="{{ url_for('history') }}" class="btn btn-secondary">Clear</a>

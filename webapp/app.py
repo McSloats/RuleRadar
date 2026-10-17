@@ -1444,6 +1444,26 @@ def api_scan_status():
     return jsonify(result)
 
 
+@app.route("/api/rule-suggest")
+@login_required
+def api_rule_suggest():
+    """
+    Live search dropdown on Detections, Updates and History (layout.html).
+    ?q=<title text>&scope=detections|updates|history — up to 8 matching rules.
+    """
+    q     = request.args.get("q", "").strip()[:200]
+    scope = request.args.get("scope", "detections")
+    if scope not in ("detections", "updates", "history"):
+        scope = "detections"
+    if len(q) < 2:
+        return jsonify(results=[])
+
+    results = db.suggest_rules(q, scope=scope)
+    for r in results:
+        r["history_url"] = url_for("history", source=r["source"], file_path=r["file_path"])
+    return jsonify(results=results)
+
+
 @app.route("/api/dashboard/stats")
 @login_required
 def api_dashboard_stats():

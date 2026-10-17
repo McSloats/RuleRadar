@@ -30,8 +30,11 @@
 
   {# Main row: title search + toggle + actions #}
   <div class="filter-bar-main">
-    <input type="text" name="title" value="{{ title }}"
-           placeholder="Search by title…" class="filter-search-input">
+    <div class="suggest-wrap">
+      <input type="text" name="title" value="{{ title }}"
+             placeholder="Search by title…" class="filter-search-input"
+             autocomplete="off" data-suggest="updates">
+    </div>
     <button type="button" class="btn btn-secondary filter-toggle-btn"
             id="filter-toggle" onclick="toggleFilterPanel()"
             aria-expanded="{{ 'true' if _panel_active else 'false' }}">

@@ -364,6 +364,40 @@
     .filter-bar-main     { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
     .filter-search-input { flex: 1; min-width: 220px; }
 
+    /* ── Live search dropdown (any input with data-suggest) ── */
+    .suggest-wrap { position: relative; flex: 1; min-width: 220px; display: flex; }
+    .suggest-wrap .filter-search-input { width: 100%; min-width: 0; }
+    .suggest-list {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      right: 0;
+      z-index: 50;
+      list-style: none;
+      background: #160f2a;
+      border: 1px solid #2b1e4a;
+      border-radius: 6px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      max-height: 340px;
+      overflow-y: auto;
+      padding: 0.25rem;
+    }
+    .suggest-item {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.45rem 0.6rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      color: #c8bfe0;
+    }
+    .suggest-item.active { background: #2b1e4a; color: #ede8f5; }
+    .suggest-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .suggest-title mark { background: none; color: #d4a017; font-weight: 600; }
+    .suggest-path { flex-shrink: 1; min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.72rem; color: #6a5888; }
+    .suggest-empty { padding: 0.5rem 0.6rem; font-size: 0.8rem; color: #6a5888; }
+
     .filter-toggle-btn   { display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
     .filter-badge        {
       background: #d4a017; color: #0d0a18;
@@ -872,6 +906,7 @@
       /* Filter search input: no enforced min-width */
       .filter-form input[type="text"],
       .filter-search-input { min-width: 0; width: 100%; }
+      .suggest-wrap { min-width: 0; }
 
       /* Filter bar: stack vertically */
       .filter-bar-main { flex-direction: column; align-items: stretch; }
@@ -1214,6 +1249,156 @@ document.addEventListener('click', function(e) {
     drawer.classList.remove('open');
     btn.setAttribute('aria-expanded', 'false');
   }
+});
+
+/* ── Live search dropdown ──────────────────────────────────────────────────
+   Any <input data-suggest="detections|updates|history"> inside a
+   .suggest-wrap gets title suggestions from /api/rule-suggest as you type.
+   Picking one submits the input's form with that exact title, or, with
+   data-suggest-navigate, opens the rule's History page instead. Enter with
+   nothing highlighted still submits the normal search. */
+document.querySelectorAll('input[data-suggest]').forEach(function(input, n) {
+  const scope    = input.dataset.suggest;
+  const navigate = input.hasAttribute('data-suggest-navigate');
+  const list     = document.createElement('ul');
+  list.className = 'suggest-list';
+  list.id        = 'suggest-list-' + n;
+  list.setAttribute('role', 'listbox');
+  list.hidden    = true;
+  input.after(list);
+  input.setAttribute('role', 'combobox');
+  input.setAttribute('aria-autocomplete', 'list');
+  input.setAttribute('aria-controls', list.id);
+  input.setAttribute('aria-expanded', 'false');
+
+  let items = [], active = -1, timer = null, seq = 0;
+
+  function close() {
+    list.hidden = true;
+    active = -1;
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+  }
+
+  function setActive(i) {
+    const els = list.querySelectorAll('.suggest-item');
+    els.forEach(el => el.classList.remove('active'));
+    active = i;
+    if (i >= 0 && els[i]) {
+      els[i].classList.add('active');
+      els[i].scrollIntoView({block: 'nearest'});
+      input.setAttribute('aria-activedescendant', els[i].id);
+    } else {
+      input.removeAttribute('aria-activedescendant');
+    }
+  }
+
+  function choose(i) {
+    const r = items[i];
+    if (!r) return;
+    close();
+    if (navigate) { window.location = r.history_url; return; }
+    input.value = r.title;
+    input.form.submit();
+  }
+
+  // Title text with the matched part highlighted (built as nodes, never HTML)
+  function titleNode(title, q) {
+    const span = document.createElement('span');
+    span.className = 'suggest-title';
+    span.title = title;
+    const at = title.toLowerCase().indexOf(q.toLowerCase());
+    if (at < 0) { span.textContent = title; return span; }
+    const mark = document.createElement('mark');
+    mark.textContent = title.slice(at, at + q.length);
+    span.append(title.slice(0, at), mark, title.slice(at + q.length));
+    return span;
+  }
+
+  function badge(cls, text) {
+    const b = document.createElement('span');
+    b.className = 'badge ' + cls;
+    b.textContent = text;
+    return b;
+  }
+
+  function render(q) {
+    list.replaceChildren();
+    if (!items.length) {
+      const li = document.createElement('li');
+      li.className = 'suggest-empty';
+      li.textContent = 'No matching rules';
+      list.append(li);
+    }
+    // Several rules can share a title -- show their file names to tell them apart
+    const seen = {};
+    items.forEach(r => { seen[r.title] = (seen[r.title] || 0) + 1; });
+    items.forEach(function(r, i) {
+      const li = document.createElement('li');
+      li.className = 'suggest-item';
+      li.id = list.id + '-' + i;
+      li.setAttribute('role', 'option');
+      li.append(titleNode(r.title || r.file_path, q));
+      if (seen[r.title] > 1) {
+        const path = document.createElement('span');
+        path.className = 'suggest-path';
+        path.textContent = r.file_path.split('/').pop();
+        path.title = r.file_path;
+        li.append(path);
+      }
+      if (r.change_type) li.append(badge('badge-' + r.change_type, r.change_type));
+      li.append(badge('badge-' + r.source, r.source));
+      // mousedown, not click, so it fires before the input's blur closes the list
+      li.addEventListener('mousedown', function(e) { e.preventDefault(); choose(i); });
+      li.addEventListener('mousemove', function() { if (active !== i) setActive(i); });
+      list.append(li);
+    });
+    active = -1;
+    list.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+  }
+
+  async function fetchSuggestions() {
+    const q = input.value.trim();
+    const mine = ++seq;
+    if (q.length < 2) { items = []; close(); return; }
+    try {
+      const res  = await fetch('/api/rule-suggest?scope=' + encodeURIComponent(scope) +
+                               '&q=' + encodeURIComponent(q));
+      const data = await res.json();
+      if (mine !== seq) return;   // a newer keystroke already took over
+      items = data.results || [];
+      render(q);
+    } catch (e) {
+      if (mine === seq) close();
+    }
+  }
+
+  input.addEventListener('input', function() {
+    clearTimeout(timer);
+    timer = setTimeout(fetchSuggestions, 150);
+  });
+
+  input.addEventListener('keydown', function(e) {
+    if (list.hidden) {
+      if (e.key === 'ArrowDown' && input.value.trim().length >= 2) { e.preventDefault(); fetchSuggestions(); }
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (items.length) setActive((active + 1) % items.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (items.length) setActive(active <= 0 ? items.length - 1 : active - 1);
+    } else if (e.key === 'Enter' && active >= 0) {
+      e.preventDefault();
+      choose(active);
+    } else if (e.key === 'Escape') {
+      close();
+    }
+  });
+
+  input.addEventListener('blur', close);
 });
 </script>
 {% endif %}
