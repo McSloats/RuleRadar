@@ -166,7 +166,7 @@ function toggleFilterPanel() {
         <th style="width:80px;">Source</th>
         <th style="width:90px;">Change</th>
         <th style="width:150px;">Detected</th>
-        <th style="width:100px;">Actions</th>
+        <th style="width:160px;">Actions</th>
       </tr>
     </thead>
     <tbody>
@@ -191,6 +191,10 @@ function toggleFilterPanel() {
           {{ row.detected_at | format_dt }}
         </td>
         <td onclick="event.stopPropagation()" style="white-space:nowrap;">
+          {% if row.file_path %}
+          <a href="{{ url_for('history', source=row.source, file_path=row.file_path) }}"
+             class="text-small" style="margin-right:0.4rem;">History</a>
+          {% endif %}
           {% if row.rule_url %}
             <a href="{{ row.rule_url }}" target="_blank" rel="noopener"
                class="text-small" style="margin-right:0.4rem;">GitHub ↗</a>
@@ -228,9 +232,9 @@ function toggleFilterPanel() {
           {# ── Diff detail — the only thing shown for a changed file ── #}
           {{ diff_block(row.diff_text, row.diff_added, row.diff_removed) }}
 
-          <p class="detail-label" style="margin-top:0.6rem;">History</p>
-          <p class="detail-text">
-            <a href="{{ url_for('history', source=row.source, file_path=row.file_path) }}">View full history →</a>
+          <p class="detail-label" style="margin-top:0.6rem;">Changes</p>
+          <p class="detail-text{{ '' if row.change_count else ' text-muted' }}">
+            {{ row.change_count }} modification{{ 's' if row.change_count != 1 else '' }} recorded
           </p>
 
           {% else %}
@@ -273,9 +277,9 @@ function toggleFilterPanel() {
           </details>
           {% endif %}
 
-          <p class="detail-label" style="margin-top:0.6rem;">History</p>
-          <p class="detail-text">
-            <a href="{{ url_for('history', source=row.source, file_path=row.file_path) }}">View full history →</a>
+          <p class="detail-label" style="margin-top:0.6rem;">Changes</p>
+          <p class="detail-text{{ '' if row.change_count else ' text-muted' }}">
+            {{ row.change_count }} modification{{ 's' if row.change_count != 1 else '' }} recorded
           </p>
 
           {% endif %}

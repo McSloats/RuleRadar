@@ -106,6 +106,8 @@ CREATE INDEX IF NOT EXISTS idx_upd_detected_at    ON updates(detected_at DESC);
 -- Composites: speeds up source-filtered and change_type-filtered update views
 CREATE INDEX IF NOT EXISTS idx_upd_source_detected ON updates(source, detected_at);
 CREATE INDEX IF NOT EXISTS idx_upd_type_detected   ON updates(change_type, detected_at);
+-- Per-rule lookups: History page modification list and per-row change counts
+CREATE INDEX IF NOT EXISTS idx_upd_source_path     ON updates(source, file_path);
 
 -- ── Repo releases ──────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS releases (
@@ -956,6 +958,37 @@ def get_rule_updates(
             params + [limit],
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_recent_rule_changes(limit: int = 5) -> list[dict]:
+    """Return the most recent rule-change events (new/modified/renamed/
+    deleted; releases excluded), newest first. History page default view."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, source, file_path, title, change_type, detected_at"
+            " FROM updates ORDER BY detected_at DESC, id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def count_rule_modifications(rules: list[tuple[str, str]]) -> dict[tuple[str, str], int]:
+    """Return {(source, file_path): modification count} for the given rules —
+    the same events the History page lists. Rules with none are omitted."""
+    rules = list({r for r in rules if r[0] and r[1]})
+    if not rules:
+        return {}
+    placeholders = ", ".join("(?, ?)" for _ in rules)
+    params = [v for r in rules for v in r]
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT source, file_path, COUNT(*) AS n FROM updates"
+            " WHERE change_type = 'modified'"
+            f" AND (source, file_path) IN (VALUES {placeholders})"
+            " GROUP BY source, file_path",
+            params,
+        ).fetchall()
+    return {(r["source"], r["file_path"]): r["n"] for r in rows}
 
 
 def get_updates(

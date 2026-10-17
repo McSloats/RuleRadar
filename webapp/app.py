@@ -636,6 +636,7 @@ def detections():
         user_filter_rows=active_filter or None,
     )
     total_pages = max(1, (total + per_page - 1) // per_page)
+    _attach_change_counts(rows)
 
     # Build set of rule_ids already in the filter for per-row button state
     filtered_rule_ids = {f["rule_id"] for f in rule_filter_rows if f.get("rule_id")}
@@ -651,6 +652,16 @@ def detections():
         filter_active=filter_active,
         filtered_rule_ids=filtered_rule_ids,
     )
+
+
+def _attach_change_counts(rows: list[dict]) -> None:
+    """Set row["change_count"] — the rule's recorded modifications, the same
+    events the History page lists — on every row tied to a rule file."""
+    counts = db.count_rule_modifications(
+        [(r["source"], r["file_path"]) for r in rows if r.get("file_path")]
+    )
+    for r in rows:
+        r["change_count"] = counts.get((r["source"], r.get("file_path")), 0)
 
 
 @app.route("/updates")
@@ -683,6 +694,7 @@ def updates():
         if row.get("diff_text"):
             added, removed = ruleradar.diff_stats(row["diff_text"])
             row["diff_added"], row["diff_removed"] = added, removed
+    _attach_change_counts(rows)
 
     # Build set of rule_ids already favorited, for per-row button state
     filtered_rule_ids = {f["rule_id"] for f in rule_filter_rows if f.get("rule_id")}
@@ -706,6 +718,7 @@ def history():
     """
     Pick a rule and see its full current file plus its last 5 modifications
     (date + diff each), reusing the diff machinery from the Updates page.
+    With no rule or search, lists the 5 most recent rule changes instead.
     """
     source    = request.args.get("source",    "").strip()
     file_path = request.args.get("file_path", "").strip()
@@ -725,10 +738,15 @@ def history():
     if q and not (source and file_path):
         results, _ = db.search_detections(title=q, per_page=25)
 
+    recent_changes = []
+    if not q and not (source and file_path):
+        recent_changes = db.get_recent_rule_changes(limit=5)
+
     return render_template(
         "history.html",
         source=source, file_path=file_path, q=q,
         selected=selected, recent_mods=recent_mods, results=results,
+        recent_changes=recent_changes,
     )
 
 

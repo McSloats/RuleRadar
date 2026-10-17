@@ -162,7 +162,7 @@ function toggleFilterPanel() {
         <th>Title</th>
         <th style="width:175px;">MITRE TTPs</th>
         <th style="width:140px;">Date</th>
-        <th style="width:100px;">Actions</th>
+        <th style="width:160px;">Actions</th>
       </tr>
     </thead>
     <tbody>
@@ -195,6 +195,8 @@ function toggleFilterPanel() {
           {{ row.last_updated | format_dt }}
         </td>
         <td onclick="event.stopPropagation()" style="white-space:nowrap;">
+          <a href="{{ url_for('history', source=row.source, file_path=row.file_path) }}"
+             class="text-small" style="margin-right:0.4rem;">History</a>
           {% if row.rule_url %}
             <a href="{{ row.rule_url }}" target="_blank" rel="noopener"
                class="text-small" style="margin-right:0.4rem;">GitHub ↗</a>
@@ -209,7 +211,7 @@ function toggleFilterPanel() {
 
       {# ── Expandable detail row ──────────────────────────────────────────────
          Uniform format for every rule, native or custom:
-         Description → MITRE TTPs → References → full file contents → History.
+         Description → MITRE TTPs → References → full file contents → change count.
       #}
       <tr class="detail-row">
         <td colspan="6">
@@ -268,9 +270,9 @@ function toggleFilterPanel() {
           {% endif %}
 
           {# History #}
-          <p class="detail-label" style="margin-top:0.6rem;">History</p>
-          <p class="detail-text">
-            <a href="{{ url_for('history', source=row.source, file_path=row.file_path) }}">View full history →</a>
+          <p class="detail-label" style="margin-top:0.6rem;">Changes</p>
+          <p class="detail-text{{ '' if row.change_count else ' text-muted' }}">
+            {{ row.change_count }} modification{{ 's' if row.change_count != 1 else '' }} recorded
           </p>
 
         </td>

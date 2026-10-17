@@ -101,8 +101,40 @@
 
 {% else %}
 
-  <div class="empty-state">
-    <p>Search for a rule above to view its full file and modification history.</p>
+  {# ── Default: most recent rule changes from the Updates feed ── #}
+  <div class="card" style="margin-top:1.25rem;">
+    <div class="card-title">Recent Changes</div>
+    {% if recent_changes %}
+      <div class="table-wrap">
+        <table class="static-table">
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th style="width:90px;">Source</th>
+              <th style="width:100px;">Change</th>
+              <th style="width:150px;">Detected</th>
+              <th style="width:110px;">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in recent_changes %}
+            <tr>
+              <td>{{ c.title or c.file_path.split('/')[-1] }}</td>
+              <td><span class="badge badge-{{ c.source }}">{{ c.source }}</span></td>
+              <td><span class="badge badge-{{ c.change_type }}">{{ c.change_type }}</span></td>
+              <td class="nowrap text-muted text-small">{{ c.detected_at | format_dt }}</td>
+              <td>
+                <a class="btn btn-sm btn-secondary"
+                   href="{{ url_for('history', source=c.source, file_path=c.file_path) }}">View</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="text-muted" style="margin-top:0.5rem;">No rule changes recorded yet.</p>
+    {% endif %}
   </div>
 
 {% endif %}
