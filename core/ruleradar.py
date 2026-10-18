@@ -759,10 +759,11 @@ def index_repo(repo_cfg: dict) -> int:
     return indexed
 
 
-def sync_repo(repo_cfg: dict) -> tuple[int, int]:
+def sync_repo(repo_cfg: dict) -> tuple[int, int, list[tuple[str, str]]]:
     """
     Fetch the latest commits and process only files that changed since last_sha.
-    Returns (new_count, modified_count).
+    Returns (new_count, modified_count, recent_titles), where recent_titles
+    holds up to five (title, change_type) pairs for the Discord message.
 
     Changed files are detected via:
         git diff --name-status <last_sha> FETCH_HEAD
