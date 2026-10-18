@@ -1,7 +1,6 @@
 # ── RuleRadar ──────────────────────────────────────────────────────────────────
-# Single image used by both the web service and the scheduler service.
-# Default command starts the web interface; docker-compose overrides it
-# for the scheduler container.
+# Single image that runs the web interface and the bi-hourly scheduler
+# together: the default command (start.py) launches both as sub-processes.
 
 FROM python:3.14-slim
 
@@ -20,7 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create the data directory where the SQLite DB and secret key are stored.
-# The docker-compose volume is mounted here, so both containers share the DB.
+# The docker-compose volume is mounted here so the DB and clones persist.
 RUN mkdir -p /app/data
 
 # Run as an unprivileged user rather than root (default container user

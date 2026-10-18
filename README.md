@@ -95,7 +95,7 @@ This removes the code, virtual environment, and the SQLite database (`ruleradar.
 # Download the Compose file
 curl -O https://raw.githubusercontent.com/McSloats/RuleRadar/main/docker-compose.yml
 
-# Start both services (web + scheduler) in the background
+# Start the container (web + scheduler) in the background
 docker compose up -d
 ```
 
@@ -144,33 +144,22 @@ docker pull tsloats/ruleradar:latest
 # Create a named volume for persistent data
 docker volume create ruleradar-db
 
-# Start the web container
+# Start the container (web interface + bi-hourly scheduler)
 docker run -d \
-  --name ruleradar-web \
+  --name ruleradar \
   -p 5000:5000 \
   -v ruleradar-db:/app/data \
   -e RULERADAR_DB=/app/data/ruleradar.db \
   -e PYTHONUNBUFFERED=1 \
   --restart unless-stopped \
   tsloats/ruleradar:latest
-
-# Start the scheduler container (waits for web to be up)
-docker run -d \
-  --name ruleradar-scheduler \
-  -v ruleradar-db:/app/data \
-  -e RULERADAR_DB=/app/data/ruleradar.db \
-  -e PYTHONUNBUFFERED=1 \
-  --restart unless-stopped \
-  tsloats/ruleradar:latest \
-  python3 core/scheduler.py
 ```
 
 Useful commands while running:
 
 ```bash
-docker logs -f ruleradar-web        # stream web logs
-docker logs -f ruleradar-scheduler  # stream scheduler logs
-docker ps                           # check running containers
+docker logs -f ruleradar   # stream web + scheduler logs
+docker ps                  # check running containers
 ```
 
 #### Update
@@ -179,35 +168,26 @@ docker ps                           # check running containers
 # Pull the new image
 docker pull tsloats/ruleradar:latest
 
-# Recreate the containers (data volume is preserved)
-docker stop ruleradar-web ruleradar-scheduler
-docker rm ruleradar-web ruleradar-scheduler
+# Recreate the container (data volume is preserved)
+docker stop ruleradar
+docker rm ruleradar
 
 docker run -d \
-  --name ruleradar-web \
+  --name ruleradar \
   -p 5000:5000 \
   -v ruleradar-db:/app/data \
   -e RULERADAR_DB=/app/data/ruleradar.db \
   -e PYTHONUNBUFFERED=1 \
   --restart unless-stopped \
   tsloats/ruleradar:latest
-
-docker run -d \
-  --name ruleradar-scheduler \
-  -v ruleradar-db:/app/data \
-  -e RULERADAR_DB=/app/data/ruleradar.db \
-  -e PYTHONUNBUFFERED=1 \
-  --restart unless-stopped \
-  tsloats/ruleradar:latest \
-  python3 core/scheduler.py
 ```
 
 #### Stop / Cleanup
 
 ```bash
-# Stop and remove containers (data volume is preserved)
-docker stop ruleradar-web ruleradar-scheduler
-docker rm ruleradar-web ruleradar-scheduler
+# Stop and remove the container (data volume is preserved)
+docker stop ruleradar
+docker rm ruleradar
 
 # Also remove the data volume (permanently deletes all data)
 docker volume rm ruleradar-db
@@ -236,4 +216,4 @@ docker rmi tsloats/ruleradar:latest
 | `web` | Flask web interface — login, browse, search, manage settings |
 | `scheduler` | Fires a scan every two hours (00:00, 02:00 … 22:00 UTC) via APScheduler |
 
-Both components share a single SQLite database (WAL mode). In Docker they share the `ruleradar-db` volume. On first setup an admin enables repositories; RuleRadar performs a shallow `git clone --depth=1` of each repo and indexes all matching rule files. Subsequent scans use `git fetch` and only process files changed since the last indexed commit.
+`start.py` runs both components as sub-processes and restarts either one if it crashes; in Docker they run together in a single container. They share a single SQLite database (WAL mode), stored on the `ruleradar-db` volume in Docker. On first setup an admin enables repositories; RuleRadar performs a shallow `git clone --depth=1` of each repo and indexes all matching rule files. Subsequent scans use `git fetch` and only process files changed since the last indexed commit.
