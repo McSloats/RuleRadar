@@ -110,8 +110,30 @@ app.secret_key = _load_secret_key()
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("RULERADAR_SITE_URL", "").startswith("https://")
+# Flask-Login's 30-day "remember me" cookie gets the same protections
+app.config["REMEMBER_COOKIE_HTTPONLY"] = True
+app.config["REMEMBER_COOKIE_SAMESITE"] = "Lax"
+app.config["REMEMBER_COOKIE_SECURE"]   = app.config["SESSION_COOKIE_SECURE"]
 
 csrf = CSRFProtect(app)
+
+# Browser hardening on every response. A full script/style CSP isn't
+# possible while all JS and CSS are inline, so the CSP covers framing,
+# plugins and <base> hijacking only.
+_SECURITY_HEADERS = {
+    "X-Frame-Options":         "DENY",
+    "X-Content-Type-Options":  "nosniff",
+    "Referrer-Policy":         "same-origin",
+    "Content-Security-Policy": "frame-ancestors 'none'; object-src 'none'; base-uri 'self'",
+}
+
+
+@app.after_request
+def _security_headers(resp):
+    for name, value in _SECURITY_HEADERS.items():
+        resp.headers.setdefault(name, value)
+    return resp
+
 
 login_manager = LoginManager(app)
 login_manager.login_view = "login"          # type: ignore[assignment]
@@ -283,10 +305,29 @@ def detect_default_branch(owner: str, repo: str) -> str | None:
 
 # ── CSRF error handler ─────────────────────────────────────────────────────────
 
+def _safe_local_path(target: str) -> str:
+    """Return `target` if it is a path on this site, else "". Rejects
+    absolute URLs, scheme-relative "//host" and backslash variants such as
+    "/\\host", which browsers treat as "//host"."""
+    if (not target.startswith("/") or target.startswith("//") or "\\" in target
+            or any(ord(c) < 32 for c in target)):
+        return ""
+    parsed = urllib.parse.urlparse(target)
+    return "" if parsed.scheme or parsed.netloc else target
+
+
+def _same_site_referrer() -> str:
+    """The Referer as a local path if it points at this site, else ""."""
+    ref = urllib.parse.urlparse(request.referrer or "")
+    if ref.netloc != request.host:
+        return ""
+    return _safe_local_path(ref.path + (f"?{ref.query}" if ref.query else ""))
+
+
 @app.errorhandler(CSRFError)
 def csrf_error(_e: CSRFError):
     flash("Your session expired or the request was invalid. Please try again.", "error")
-    return redirect(request.referrer or url_for("index"))
+    return redirect(_same_site_referrer() or url_for("index"))
 
 
 # ── User model ─────────────────────────────────────────────────────────────────
@@ -430,6 +471,10 @@ def setup():
     return render_template("setup.html")
 
 
+# Same cost factor as real password hashes (bcrypt.gensalt() default)
+_DUMMY_PASSWORD_HASH = bcrypt.hashpw(secrets.token_bytes(16), bcrypt.gensalt())
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if db.user_count() == 0:
@@ -444,15 +489,15 @@ def login():
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         row      = db.get_user_by_username(username)
-        if row and bcrypt.checkpw(password.encode(), row["password_hash"].encode()):
+        # Always run bcrypt, against a dummy hash for unknown users, so the
+        # response time doesn't reveal whether the username exists
+        pw_hash  = row["password_hash"].encode() if row else _DUMMY_PASSWORD_HASH
+        if bcrypt.checkpw(password.encode(), pw_hash) and row:
             login_user(User(row), remember=True, duration=timedelta(days=30))
             db.log_activity("auth", f"User '{username}' logged in",
                             actor=username,
                             detail=f"ip={request.remote_addr}")
-            next_page = request.args.get("next", "")
-            parsed    = urllib.parse.urlparse(next_page)
-            if parsed.scheme or parsed.netloc:
-                next_page = ""
+            next_page = _safe_local_path(request.args.get("next", ""))
             return redirect(next_page or url_for("dashboard"))
         db.log_activity("auth", f"Failed login attempt for '{username}'",
                         actor=username or "unknown",
