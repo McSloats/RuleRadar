@@ -6,6 +6,9 @@ tomli>=2.0,<3.0; python_version < "3.11"  # TOML parsing for Elastic rules (stdl
 flask>=3.0,<4.0
 flask-login>=0.6,<1.0
 flask-wtf>=1.2,<2.0
+# Production WSGI server (start.py, Docker). Not available on Windows, where
+# start.py falls back to Flask's development server for local use.
+gunicorn>=23.0,<27.0; sys_platform != "win32"
 bcrypt>=4.0                                # no upper cap — 5.x required for Python 3.14+
 
 # Scheduler (replaces OS cron inside Docker / locally)

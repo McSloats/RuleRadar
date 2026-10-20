@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
 RuleRadar launcher — starts the web interface and scheduler together.
-Use this for a complete local setup without Docker.
+Used by Docker (the image's default command) and for local setups.
+
+The web interface runs under gunicorn, a production server (settings in
+webapp/gunicorn.conf.py). On Windows, or if gunicorn isn't installed, it
+falls back to Flask's development server, which is for local use only.
 
 Usage:
     python3 start.py            # start webapp + scheduler
@@ -9,6 +13,7 @@ Usage:
 """
 
 import argparse
+import importlib.util
 import signal
 import subprocess
 import sys
@@ -18,12 +23,22 @@ from pathlib import Path
 BASE   = Path(__file__).parent
 PY     = sys.executable   # same interpreter that launched this script
 WEBAPP = BASE / "webapp" / "app.py"
+GUNICORN_CONF = BASE / "webapp" / "gunicorn.conf.py"
 SCHED  = BASE / "core" / "scheduler.py"
 RADAR  = BASE / "core" / "ruleradar.py"
 
 
+def _web_command() -> list[str]:
+    if sys.platform != "win32" and importlib.util.find_spec("gunicorn"):
+        return [PY, "-m", "gunicorn", "-c", str(GUNICORN_CONF)]
+    print(">>> gunicorn unavailable — using Flask's development server "
+          "(local use only, not for production)", flush=True)
+    return [PY, str(WEBAPP)]
+
+
 def start(script: Path) -> subprocess.Popen:
-    return subprocess.Popen([PY, str(script)])
+    cmd = _web_command() if script == WEBAPP else [PY, str(script)]
+    return subprocess.Popen(cmd)
 
 
 def main():
@@ -60,8 +75,15 @@ def main():
     # ── Graceful shutdown on Ctrl+C / SIGTERM ──────────────────────────────────
     def shutdown(sig, frame):
         print("\n>>> Shutting down…", flush=True)
-        for name, proc in procs.items():
+        for proc in procs.values():
             proc.terminate()
+        # Wait for both to finish (gunicorn lets in-flight requests complete,
+        # up to graceful_timeout) — in Docker the container ends when this exits
+        for name, proc in procs.items():
+            try:
+                proc.wait(timeout=35)
+            except subprocess.TimeoutExpired:
+                proc.kill()
             print(f"    Stopped {name} (PID {proc.pid})", flush=True)
         sys.exit(0)
 

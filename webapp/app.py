@@ -2162,6 +2162,9 @@ def health():
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    # Flask's development server, for running this file directly while
+    # developing. Production (start.py, Docker) serves the app with gunicorn
+    # using webapp/gunicorn.conf.py instead.
     # threaded=True lets concurrent requests (page loads + 15-s badge poll) be
     # handled in parallel rather than queueing behind each other.
     app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)

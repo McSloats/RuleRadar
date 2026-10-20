@@ -35,5 +35,5 @@ USER ruleradar
 # Web service listens on 5000
 EXPOSE 5000
 
-# Default: run the web interface + bi-hourly scheduler together
+# Default: run the web interface (gunicorn) + bi-hourly scheduler together
 CMD ["python3", "start.py"]

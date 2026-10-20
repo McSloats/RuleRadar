@@ -53,13 +53,13 @@ pip install -r requirements.txt
 python3 start.py
 ```
 
-`start.py` launches the Flask web server (port 5000) and the bi-hourly scheduler together in one process. Pass `--run-now` to also fire an immediate scan on startup.
+`start.py` launches the web interface (port 5000) and the bi-hourly scheduler together, and restarts either if it crashes. The web interface runs under [gunicorn](https://gunicorn.org/), a production server; on Windows, where gunicorn isn't available, it falls back to Flask's development server, which is fine for local use. Pass `--run-now` to also fire an immediate scan on startup.
 
 Run components individually if needed:
 
 | Command | What it does |
 |---------|-------------|
-| `python3 webapp/app.py` | Web interface only (port 5000) |
+| `python3 webapp/app.py` | Web interface only, on Flask's development server (port 5000) — for debugging, not production |
 | `python3 core/scheduler.py` | Bi-hourly scheduler only |
 | `python3 core/ruleradar.py` | Run one scan cycle immediately |
 
