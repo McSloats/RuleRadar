@@ -14,6 +14,8 @@ Pages
   /settings       → per-user: password, Discord webhook, saved filters
   /admin          → admin-only: repository management, user management
   /admin/activity → admin-only: activity log
+  /api/v1/...     → read-only JSON API, authenticated with a per-user API key
+                    (Authorization: Bearer rr_...) created on /settings
 
 Scan policy
 -----------
@@ -63,9 +65,10 @@ from core import database as db
 from core import ruleradar
 
 from flask import (
-    Flask, Response, abort, flash, jsonify, redirect,
-    render_template, request, session, url_for,
+    Blueprint, Flask, Response, abort, flash, g, jsonify, make_response,
+    redirect, render_template, request, session, url_for,
 )
+from werkzeug.exceptions import HTTPException
 from flask_login import (
     LoginManager, UserMixin, current_user,
     login_required, login_user, logout_user,
@@ -373,7 +376,7 @@ _REPO_GATE_SKIP = {
     "admin_toggle_admin", "admin_reset_password", "admin_delete_user",
     "admin_activity",
     "admin_repos_add", "admin_repos_toggle", "admin_repos_remove",
-    "admin_scan_now",
+    "admin_scan_now", "admin_revoke_api_key",
     None,
 }
 
@@ -387,7 +390,7 @@ def require_repos_setup():
 
     Unauthenticated users are handled by @login_required on individual routes.
     """
-    if request.endpoint in _REPO_GATE_SKIP:
+    if request.endpoint in _REPO_GATE_SKIP or request.blueprint == "api_v1":
         return
     if not current_user.is_authenticated:
         return  # @login_required redirects them to /login
@@ -640,6 +643,13 @@ def _relative_time(ts_iso: str) -> str:
     try:
         ts      = datetime.fromisoformat(ts_iso.replace("Z", "+00:00"))
         seconds = int((datetime.now(timezone.utc) - ts).total_seconds())
+        if seconds < -60:   # future (e.g. an API key's expiry)
+            ahead = -seconds
+            if ahead < 3600:
+                return f"in {ahead // 60}m"
+            if ahead < 86400:
+                return f"in {ahead // 3600}h"
+            return f"in {ahead // 86400}d"
         if seconds < 60:
             return "just now"
         if seconds < 3600:
@@ -1055,7 +1065,13 @@ def rule_filter_delete(filter_id: int):
 @app.route("/settings")
 @login_required
 def settings():
-    """Per-user settings: password, Discord webhook, saved filters, scan status."""
+    """Per-user settings: password, Discord webhook, API key, saved filters, scan status."""
+    return _render_settings()
+
+
+def _render_settings(new_api_key: str = ""):
+    """Render the Settings page. `new_api_key` is the plaintext of a key
+    created by this very request — the only time it is ever shown."""
     user_settings = db.get_user_settings(current_user.id)
     try:
         saved_filters = json.loads(user_settings.get("saved_filters", "[]"))
@@ -1078,7 +1094,81 @@ def settings():
         last_scan=last_scan,
         next_scan=next_scan,
         repos=repos,
+        api_key=db.get_api_key(current_user.id),
+        new_api_key=new_api_key,
+        expiry_choices=_API_KEY_EXPIRY_LABELS,
+        default_expiry=db.API_KEY_DEFAULT_EXPIRY,
+        api_base_url=request.host_url.rstrip("/") + "/api/v1",
+        api_docs_url=API_DOCS_URL,
     )
+
+
+# Dropdown labels for db.API_KEY_EXPIRY_CHOICES, in display order
+_API_KEY_EXPIRY_LABELS = [
+    ("1", "1 day"), ("7", "7 days"), ("30", "30 days"),
+    ("90", "90 days"), ("365", "1 year"), ("never", "Never"),
+]
+
+
+def _requested_expiry() -> tuple[str, int | None] | None:
+    """The expiry chosen on the form as (choice, days), or None if invalid."""
+    choice = request.form.get("expires", db.API_KEY_DEFAULT_EXPIRY)
+    if choice not in db.API_KEY_EXPIRY_CHOICES:
+        return None
+    return choice, db.API_KEY_EXPIRY_CHOICES[choice]
+
+
+def _show_new_api_key(key: str):
+    """Render Settings with the new key shown once. Rendered directly (not
+    flashed, which would put the key in the session cookie) and marked
+    no-store so the browser doesn't cache it."""
+    resp = make_response(_render_settings(new_api_key=key))
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+def _expiry_detail(choice: str) -> str:
+    return "expires: never" if choice == "never" else f"expires in {choice} day(s)"
+
+
+@app.route("/settings/api-key/generate", methods=["POST"])
+@login_required
+def settings_api_key_generate():
+    """Create the user's single API key and show it once."""
+    expiry = _requested_expiry()
+    if expiry is None:
+        flash("Choose a valid expiration.", "error")
+        return redirect(url_for("settings"))
+    key = db.create_api_key(current_user.id, expiry[1])
+    if key is None:
+        flash("You already have an API key. Regenerate or revoke it instead.", "error")
+        return redirect(url_for("settings"))
+    db.log_activity("user", "API key generated", actor=current_user.username,
+                    detail=_expiry_detail(expiry[0]))
+    return _show_new_api_key(key)
+
+
+@app.route("/settings/api-key/regenerate", methods=["POST"])
+@login_required
+def settings_api_key_regenerate():
+    """Revoke the current key and issue a new one in one step."""
+    expiry = _requested_expiry()
+    if expiry is None:
+        flash("Choose a valid expiration.", "error")
+        return redirect(url_for("settings"))
+    key = db.replace_api_key(current_user.id, expiry[1])
+    db.log_activity("user", "API key regenerated (previous key revoked)",
+                    actor=current_user.username, detail=_expiry_detail(expiry[0]))
+    return _show_new_api_key(key)
+
+
+@app.route("/settings/api-key/revoke", methods=["POST"])
+@login_required
+def settings_api_key_revoke():
+    if db.revoke_api_key(current_user.id):
+        db.log_activity("user", "API key revoked", actor=current_user.username)
+        flash("API key revoked. Anything using it will stop working immediately.", "success")
+    return redirect(url_for("settings"))
 
 
 @app.route("/settings/password", methods=["POST"])
@@ -1248,6 +1338,7 @@ def admin():
         common_timezones=COMMON_TIMEZONES,
         max_fetch_failures=ruleradar.MAX_CONSECUTIVE_FETCH_FAILURES,
         max_events_per_rule=db.get_max_events_per_rule(),
+        now_utc=db.now_iso(),   # to mark expired API keys
     )
 
 
@@ -1547,7 +1638,20 @@ def admin_delete_user(user_id: int):
     return redirect(url_for("admin"))
 
 
-# ── API ────────────────────────────────────────────────────────────────────────
+@app.route("/admin/users/<int:user_id>/revoke-api-key", methods=["POST"])
+@admin_required
+def admin_revoke_api_key(user_id: int):
+    row = db.get_user_by_id(user_id)
+    if not row:
+        abort(404)
+    if db.revoke_api_key(user_id):
+        db.log_activity("admin", f"API key revoked for '{row['username']}'",
+                        actor=current_user.username)
+        flash(f"API key revoked for \"{row['username']}\".", "success")
+    return redirect(url_for("admin"))
+
+
+# ── Internal JSON endpoints (browser session) ─────────────────────────────────
 
 @app.route("/api/scan/status")
 @login_required
@@ -1679,6 +1783,373 @@ def admin_activity():
         category=category, level=level, actor=actor,
     )
 
+
+
+# ── Public API v1 (API-key auth) ───────────────────────────────────────────────
+#
+# Read-only JSON API for scripts and tools. Every request must send the
+# caller's key as "Authorization: Bearer rr_..." — browser sessions are not
+# accepted here, so the API can't be driven cross-site from a logged-in
+# browser. Keys are created and revoked on /settings (one per user).
+
+api_v1 = Blueprint("api_v1", __name__, url_prefix="/api/v1")
+
+# Full endpoint and parameter reference lives in the GitHub wiki, linked
+# from the API Key card on /settings
+API_DOCS_URL = "https://github.com/McSloats/RuleRadar/wiki/API"
+
+_API_RATE_WINDOW     = 60    # seconds
+_API_RATE_MAX        = 120   # requests per window per key
+_API_AUTH_FAIL_MAX   = 10    # failed authentications per window per IP
+_API_TOUCH_INTERVAL  = 60    # seconds between last_used_at writes per key
+_API_MAX_PER_PAGE    = 200
+_API_MAX_INT         = 1_000_000   # bound for page/days so SQLite never sees an oversized integer
+
+_api_requests:      dict[int, list[float]] = defaultdict(list)
+_api_auth_failures: dict[str, list[float]] = defaultdict(list)
+_api_lock = threading.Lock()
+
+
+def _api_error(status: int, message: str, **headers):
+    resp = jsonify(error={"status": status, "message": message})
+    resp.status_code = status
+    for k, v in headers.items():
+        resp.headers[k.replace("_", "-")] = v
+    return resp
+
+
+def _window_hits(bucket: list[float], now: float) -> list[float]:
+    bucket[:] = [t for t in bucket if now - t < _API_RATE_WINDOW]
+    return bucket
+
+
+@api_v1.before_request
+def _api_authenticate():
+    """Resolve the Bearer key to a user (in g.api_user) or reject the request."""
+    ip  = request.remote_addr or ""
+    now = time.time()
+
+    # The key is checked before the failure limit, so a valid key always
+    # works: junk requests from a shared IP (NAT, reverse proxy) can't lock
+    # out real users, and 256-bit keys can't be guessed anyway. The failure
+    # limit throttles bad callers and stops them flooding the activity log.
+    scheme, _, key = request.headers.get("Authorization", "").partition(" ")
+    user = db.authenticate_api_key(key.strip()) if scheme.lower() == "bearer" else None
+    expired = bool(user and user["expired"])
+    if user is None or expired:
+        with _api_lock:
+            failures = _window_hits(_api_auth_failures[ip], now)
+            over_limit = len(failures) >= _API_AUTH_FAIL_MAX
+            if not over_limit:
+                failures.append(now)
+        if over_limit:
+            return _api_error(429, "Too many failed authentication attempts. Try again later.",
+                              Retry_After=str(_API_RATE_WINDOW))
+        if expired:
+            db.log_activity("auth", "API request with expired key",
+                            actor=user["username"], detail=f"ip={ip} path={request.path}",
+                            level="warning")
+            return _api_error(401, "API key has expired. Regenerate it on the Settings page.",
+                              WWW_Authenticate='Bearer realm="RuleRadar", error="invalid_token"')
+        db.log_activity("auth", "API request with missing or invalid key",
+                        actor="anonymous", detail=f"ip={ip} path={request.path}",
+                        level="warning")
+        return _api_error(401, "Missing or invalid API key. Send 'Authorization: Bearer <key>'.",
+                          WWW_Authenticate='Bearer realm="RuleRadar"')
+
+    with _api_lock:
+        hits = _window_hits(_api_requests[user["id"]], now)
+        if len(hits) >= _API_RATE_MAX:
+            return _api_error(429, f"Rate limit exceeded ({_API_RATE_MAX} requests per minute).",
+                              Retry_After=str(_API_RATE_WINDOW))
+        hits.append(now)
+
+    # Throttle the last-used write so busy scripts don't write on every call
+    last = user.get("last_used_at") or ""
+    if not last or (datetime.now(timezone.utc)
+                    - datetime.strptime(last, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+                    ).total_seconds() >= _API_TOUCH_INTERVAL:
+        db.touch_api_key(user["id"], ip)
+
+    g.api_user = user
+
+
+@api_v1.after_request
+def _api_no_store(resp):
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+class _BadParam(Exception):
+    pass
+
+
+@api_v1.errorhandler(_BadParam)
+def _api_bad_param(e):
+    return _api_error(400, str(e))
+
+
+def _int_arg(name: str, default: int, lo: int, hi: int = _API_MAX_INT) -> int:
+    raw = request.args.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        raise _BadParam(f"'{name}' must be an integer.")
+    if not lo <= value <= hi:
+        raise _BadParam(f"'{name}' must be between {lo} and {hi}.")
+    return value
+
+
+def _since_arg() -> str:
+    """Parse ?since= (ISO 8601 date or datetime; no offset means UTC) into
+    the UTC '%Y-%m-%dT%H:%M:%SZ' form the database stores."""
+    raw = request.args.get("since", "").strip()
+    if not raw:
+        return ""
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        raise _BadParam("'since' must be an ISO 8601 date or datetime, e.g. 2026-10-01 or 2026-10-01T12:00:00Z.")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _bool_arg(name: str) -> bool:
+    return request.args.get(name, "").strip().lower() in ("1", "true", "yes")
+
+
+def _split(value: str, sep: str) -> list[str]:
+    return [v.strip() for v in (value or "").split(sep) if v.strip()]
+
+
+def _api_detection(row: dict, include_raw: bool = False) -> dict:
+    out = {
+        "source":           row["source"],
+        "file_path":        row["file_path"],
+        "rule_id":          row.get("rule_id", ""),
+        "title":            row["title"],
+        "description":      row["description"],
+        "author":           row.get("author", ""),
+        "status":           row.get("rule_status", ""),
+        "date":             row.get("rule_date", ""),
+        "mitre_techniques": _split(row.get("mitre_techniques", ""), "|"),
+        "mitre_tactics":    _split(row.get("mitre_tactics", ""), "|"),
+        "references":       _split(row.get("refs", ""), "\n"),
+        "detection_logic":  row.get("detection_logic", ""),
+        "spl":              row.get("spl", ""),
+        "rule_url":         row["rule_url"],
+        "first_seen":       row["first_seen"],
+        "last_updated":     row["last_updated"],
+    }
+    if include_raw:
+        out["raw_content"] = row.get("raw_content", "")
+    return out
+
+
+def _api_event(row: dict, include_diff: bool = False) -> dict:
+    out = {
+        "id":          row["id"],
+        "source":      row["source"],
+        "change_type": row["change_type"],
+        "title":       row["title"],
+        "detected_at": row["detected_at"],
+        "url":         row["rule_url"],
+    }
+    if row["change_type"] == "release":
+        out["tag_name"] = row.get("tag_name") or ""
+        out["body"]     = row.get("body") or ""
+        return out
+    out["file_path"] = row["file_path"]
+    if "rule_id" in row:
+        out["rule_id"]          = row.get("rule_id") or ""
+        out["mitre_techniques"] = _split(row.get("mitre_techniques") or "", "|")
+    diff = row.get("diff_text") or ""
+    added, removed = ruleradar.diff_stats(diff) if diff else (0, 0)
+    out["lines_added"], out["lines_removed"] = added, removed
+    if include_diff:
+        out["diff"] = diff
+    return out
+
+
+def _paginated(items: list, total: int, page: int, per_page: int):
+    return jsonify(
+        data=items,
+        pagination={
+            "page":        page,
+            "per_page":    per_page,
+            "total":       total,
+            "total_pages": max(1, (total + per_page - 1) // per_page),
+        },
+    )
+
+
+def _api_user_filters() -> list[dict] | None:
+    """The caller's My Rules filter rows when ?my_rules=true, else None.
+    An empty My Rules list matches nothing (the db helpers treat an empty
+    list as "no filter", so callers must check for it)."""
+    if not _bool_arg("my_rules"):
+        return None
+    return db.get_user_rule_filters(g.api_user["id"])
+
+
+@api_v1.route("/me")
+def api_v1_me():
+    """Who the key belongs to — handy for checking a key works."""
+    u = g.api_user
+    return jsonify(
+        username=u["username"], is_admin=bool(u["is_admin"]),
+        key_prefix=u["key_prefix"], key_created_at=u["key_created_at"],
+        key_expires_at=u["key_expires_at"] or None,
+    )
+
+
+@api_v1.route("/status")
+def api_v1_status():
+    """Scan status: last and next scan, counts from the last scan, per-repo state."""
+    status = db.get_scan_status()
+    return jsonify(
+        is_scanning=bool(status.get("is_scanning")),
+        last_scan=status.get("last_scan") or "",
+        last_scan_new=status.get("new_count", 0),
+        last_scan_modified=status.get("mod_count", 0),
+        next_scan=_next_scheduled_scan().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        repos=[
+            {"name": r["name"], "status": r["status"], "error": r["error_msg"],
+             "last_synced_at": r["last_synced_at"]}
+            for r in db.get_all_repos()
+        ],
+    )
+
+
+@api_v1.route("/repos")
+def api_v1_repos():
+    """Monitored repositories (local disk paths are not exposed)."""
+    return jsonify(data=[
+        {
+            "name":           r["name"],
+            "display_name":   r["display_name"],
+            "url":            f"https://github.com/{r['owner']}/{r['repo']}",
+            "branch":         r["branch"],
+            "parser":         r["parser"],
+            "enabled":        bool(r["enabled"]),
+            "status":         r["status"],
+            "last_sha":       r["last_sha"],
+            "last_synced_at": r["last_synced_at"],
+        }
+        for r in db.get_all_repos()
+    ])
+
+
+@api_v1.route("/detections")
+def api_v1_detections():
+    """
+    Search current rules, newest-updated first.
+    ?q=title text  &description=  &source=sigma  &mitre=T1059 or tactic
+    &details=keyword in logic/author/refs/raw file  &days=N  &since=ISO date
+    &my_rules=true  &include_raw=true  &page=1  &per_page=50 (max 200)
+    """
+    page     = _int_arg("page", 1, 1)
+    per_page = _int_arg("per_page", 50, 1, _API_MAX_PER_PAGE)
+    days     = _int_arg("days", 0, 1)
+    filters  = _api_user_filters()
+    if filters == []:
+        return _paginated([], 0, page, per_page)
+    rows, total = db.search_detections(
+        title=request.args.get("q", "").strip(),
+        description=request.args.get("description", "").strip(),
+        source=request.args.get("source", "").strip(),
+        mitre=request.args.get("mitre", "").strip(),
+        days=str(days) if days else "",
+        details_q=request.args.get("details", "").strip(),
+        since=_since_arg(),
+        page=page, per_page=per_page,
+        user_filter_rows=filters,
+    )
+    include_raw = _bool_arg("include_raw")
+    return _paginated([_api_detection(r, include_raw) for r in rows], total, page, per_page)
+
+
+@api_v1.route("/detections/<source>/<path:file_path>")
+def api_v1_detection(source: str, file_path: str):
+    """One rule, including its raw file and number of recorded modifications."""
+    row = db.get_detection(source, file_path)
+    if not row:
+        return _api_error(404, "No rule with that source and file path.")
+    out = _api_detection(row, include_raw=True)
+    out["modification_count"] = db.count_rule_modifications(
+        [(source, file_path)]).get((source, file_path), 0)
+    return jsonify(out)
+
+
+@api_v1.route("/history/<source>/<path:file_path>")
+def api_v1_history(source: str, file_path: str):
+    """Every recorded change event for one rule, newest first, with diffs.
+    Works for deleted rules too, as long as their events are still kept."""
+    events = db.get_rule_updates(source, file_path, limit=db.get_max_events_per_rule())
+    if not events and not db.get_detection(source, file_path):
+        return _api_error(404, "No rule or recorded history with that source and file path.")
+    return jsonify(
+        source=source, file_path=file_path,
+        data=[_api_event(e, include_diff=True) for e in events],
+    )
+
+
+@api_v1.route("/updates")
+def api_v1_updates():
+    """
+    Change feed (new/modified/deleted/renamed rules and repo releases), newest first.
+    ?source=  &change_type=new|modified|deleted|renamed|release  &q=title text
+    &details=keyword  &days=N  &since=ISO date  &my_rules=true  &include_diff=true
+    &page=1  &per_page=50 (max 200)
+    """
+    change_type = request.args.get("change_type", "").strip()
+    if change_type not in ("", "new", "modified", "deleted", "renamed", "release"):
+        raise _BadParam("'change_type' must be one of new, modified, deleted, renamed, release.")
+    page     = _int_arg("page", 1, 1)
+    per_page = _int_arg("per_page", 50, 1, _API_MAX_PER_PAGE)
+    days     = _int_arg("days", 0, 1)
+    filters  = _api_user_filters()
+    if filters == []:
+        return _paginated([], 0, page, per_page)
+    rows, total = db.get_updates(
+        source=request.args.get("source", "").strip(),
+        change_type=change_type,
+        title=request.args.get("q", "").strip(),
+        days=str(days) if days else "",
+        details_q=request.args.get("details", "").strip(),
+        since=_since_arg(),
+        limit=per_page, offset=(page - 1) * per_page,
+        user_filter_rows=filters,
+    )
+    include_diff = _bool_arg("include_diff")
+    return _paginated([_api_event(r, include_diff) for r in rows], total, page, per_page)
+
+
+@api_v1.route("/my-rules")
+def api_v1_my_rules():
+    """The caller's My Rules list: the filter rows and the rules they match."""
+    filters = db.get_user_rule_filters(g.api_user["id"])
+    rows = db.search_detections(user_filter_rows=filters, per_page=500)[0] if filters else []
+    return jsonify(
+        filters=[{"rule_id": f["rule_id"], "title_pattern": f["title_pattern"],
+                  "source": f["source"]} for f in filters],
+        data=[_api_detection(r) for r in rows],
+    )
+
+
+app.register_blueprint(api_v1)
+
+
+@app.errorhandler(HTTPException)
+def _http_error(e: HTTPException):
+    """JSON errors under /api/v1 (unknown endpoint, wrong method, ...);
+    the default HTML error pages everywhere else."""
+    if request.path.startswith("/api/v1/") or request.path == "/api/v1":
+        return _api_error(e.code or 500, e.description or e.name)
+    return e
 
 
 # ── Health check ───────────────────────────────────────────────────────────────

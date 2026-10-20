@@ -6,7 +6,10 @@ All other modules import from here; nothing here imports from the project.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
+import secrets
 import sqlite3
 import threading
 from datetime import datetime, timezone, timedelta
@@ -170,6 +173,21 @@ CREATE TABLE IF NOT EXISTS user_rule_filters (
     UNIQUE(user_id, rule_id, title_pattern, source)
 );
 CREATE INDEX IF NOT EXISTS idx_urf_user_id ON user_rule_filters(user_id);
+
+-- ── Per-user API keys ────────────────────────────────────────────────────────
+-- At most one key per user (UNIQUE user_id). Only a SHA-256 hash of the key
+-- is stored; the plaintext is shown once at creation and never again.
+-- key_prefix is the non-secret start of the key, for identifying it in the UI.
+CREATE TABLE IF NOT EXISTS api_keys (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    key_hash     TEXT    NOT NULL UNIQUE,
+    key_prefix   TEXT    NOT NULL,
+    created_at   TEXT    NOT NULL,
+    last_used_at TEXT    NOT NULL DEFAULT '',
+    last_used_ip TEXT    NOT NULL DEFAULT '',
+    expires_at   TEXT    NOT NULL DEFAULT ''    -- '' = never expires
+);
 """
 
 
@@ -240,6 +258,8 @@ def _migrate_schema(conn: sqlite3.Connection):
         "ALTER TABLE detections ADD COLUMN raw_content TEXT NOT NULL DEFAULT ''",
         # v7: unified diff vs. the previously stored file, for modified/renamed/deleted updates
         "ALTER TABLE updates ADD COLUMN diff_text TEXT NOT NULL DEFAULT ''",
+        # v8: API key expiry ('' = never)
+        "ALTER TABLE api_keys ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''",
     ]
     for sql in migrations:
         try:
@@ -289,9 +309,13 @@ def get_all_users() -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
             """SELECT u.id, u.username, u.is_admin, u.created_at,
-                      COALESCE(s.discord_webhook, '') AS discord_webhook
+                      COALESCE(s.discord_webhook, '') AS discord_webhook,
+                      COALESCE(k.key_prefix,   '') AS api_key_prefix,
+                      COALESCE(k.last_used_at, '') AS api_key_last_used,
+                      COALESCE(k.expires_at,   '') AS api_key_expires_at
                FROM users u
                LEFT JOIN user_settings s ON s.user_id = u.id
+               LEFT JOIN api_keys      k ON k.user_id = u.id
                ORDER BY u.id""",
         ).fetchall()
         return [dict(r) for r in rows]
@@ -892,6 +916,7 @@ def search_detections(
     page: int = 1,
     per_page: int = 50,
     user_filter_rows: list | None = None,
+    since: str = "",
 ) -> tuple[list[dict], int]:
     """
     Search detections with per-field filters and a detail-panel keyword search.
@@ -902,6 +927,7 @@ def search_detections(
     - days             : '7'|'30'|'90'|'' — limit to rules updated in the last N days
     - details_q        : keyword across detection_logic, spl, author, rule_status, rule_date, refs, raw_content
     - user_filter_rows : if set, only return rules matching at least one filter row
+    - since            : UTC '%Y-%m-%dT%H:%M:%SZ' — limit to rules updated at or after it
     Returns (rows, total_count).
     """
     conditions, params = [], []
@@ -927,6 +953,9 @@ def search_detections(
             params.append(cutoff)
         except ValueError:
             pass
+    if since:
+        conditions.append("last_updated >= ?")
+        params.append(since)
     if details_q:
         conditions.append(
             "(detection_logic LIKE ? OR spl LIKE ? OR author LIKE ?"
@@ -1090,6 +1119,7 @@ def get_updates(
     limit: int = 100,
     offset: int = 0,
     user_filter_rows: list | None = None,
+    since: str = "",
 ) -> tuple[list[dict], int]:
     """
     Return paginated update events and GitHub releases, newest first.
@@ -1102,6 +1132,7 @@ def get_updates(
     - title       : keyword search on title / release name
     - days        : '7'|'30'|'90'|'' — limit to events detected in the last N days
     - details_q   : keyword across diff text, rule fields, raw file content, and release body
+    - since       : UTC '%Y-%m-%dT%H:%M:%SZ' — limit to events detected at or after it
     """
     show_updates  = change_type != "release"
     show_releases = change_type in ("", "release")
@@ -1115,6 +1146,9 @@ def get_updates(
             ).strftime("%Y-%m-%dT%H:%M:%SZ")
         except ValueError:
             pass
+    # Both bounds are UTC ISO strings in the same format, so the later one wins
+    if since:
+        cutoff = max(cutoff or "", since)
 
     # ── Updates side ────────────────────────────────────────────────────────────
     u_conds, u_params = [], []
@@ -1254,6 +1288,116 @@ def upsert_release(
             (source, tag_name, name, body, published_at, html_url, now_iso()),
         )
         return True
+
+
+# ── API keys ───────────────────────────────────────────────────────────────────
+
+API_KEY_PREFIX = "rr_"
+
+# Lifetimes offered when creating a key, in days; None = never expires
+API_KEY_EXPIRY_CHOICES: dict[str, int | None] = {
+    "1": 1, "7": 7, "30": 30, "90": 90, "365": 365, "never": None,
+}
+API_KEY_DEFAULT_EXPIRY = "30"
+
+
+def hash_api_key(key: str) -> str:
+    """SHA-256 of the key. Keys are 256-bit random values, so a fast hash is
+    the standard choice: there is nothing to brute-force, and a slow password
+    hash (bcrypt) would only add latency to every API request."""
+    return hashlib.sha256(key.encode()).hexdigest()
+
+
+def _insert_api_key(conn: sqlite3.Connection, user_id: int, expires_days: int | None) -> str:
+    key = API_KEY_PREFIX + secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    expires_at = (
+        (now + timedelta(days=expires_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if expires_days else ""
+    )
+    conn.execute(
+        """INSERT INTO api_keys (user_id, key_hash, key_prefix, created_at, expires_at)
+           VALUES (?, ?, ?, ?, ?)""",
+        (user_id, hash_api_key(key), key[:len(API_KEY_PREFIX) + 8],
+         now.strftime("%Y-%m-%dT%H:%M:%SZ"), expires_at),
+    )
+    return key
+
+
+def create_api_key(user_id: int, expires_days: int | None = None) -> str | None:
+    """Create the user's API key, valid for `expires_days` (None = never),
+    and return the plaintext — the only time it exists outside the caller.
+    Returns None if the user already has a key."""
+    try:
+        with get_conn() as conn:
+            return _insert_api_key(conn, user_id, expires_days)
+    except sqlite3.IntegrityError:
+        return None   # UNIQUE(user_id): one key per user
+
+
+def replace_api_key(user_id: int, expires_days: int | None = None) -> str:
+    """Revoke the user's key (if any) and create a new one in a single
+    transaction, so the old key stops working the moment the new one exists.
+    Returns the new key's plaintext."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM api_keys WHERE user_id = ?", (user_id,))
+        return _insert_api_key(conn, user_id, expires_days)
+
+
+def get_api_key(user_id: int) -> dict | None:
+    """The user's key metadata (never the key itself), or None."""
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT key_prefix, created_at, last_used_at, last_used_ip, expires_at
+               FROM api_keys WHERE user_id = ?""",
+            (user_id,),
+        ).fetchone()
+    if not row:
+        return None
+    key = dict(row)
+    key["expired"] = bool(key["expires_at"]) and key["expires_at"] <= now_iso()
+    return key
+
+
+def revoke_api_key(user_id: int) -> bool:
+    """Delete the user's key. Returns True if one existed."""
+    with get_conn() as conn:
+        return conn.execute(
+            "DELETE FROM api_keys WHERE user_id = ?", (user_id,)
+        ).rowcount > 0
+
+
+def authenticate_api_key(key: str) -> dict | None:
+    """Return {id, username, is_admin, key_prefix, key_created_at,
+    key_expires_at, last_used_at, expired} for the user owning `key`, or None
+    if it is not a known key. Callers must reject the key if `expired`."""
+    if not key.startswith(API_KEY_PREFIX):
+        return None
+    key_hash = hash_api_key(key)
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT u.id, u.username, u.is_admin, k.key_hash, k.key_prefix,
+                      k.created_at AS key_created_at, k.expires_at AS key_expires_at,
+                      k.last_used_at
+               FROM api_keys k JOIN users u ON u.id = k.user_id
+               WHERE k.key_hash = ?""",
+            (key_hash,),
+        ).fetchone()
+    if not row or not hmac.compare_digest(row["key_hash"], key_hash):
+        return None
+    user = dict(row)
+    del user["key_hash"]
+    user["expired"] = bool(user["key_expires_at"]) and user["key_expires_at"] <= now_iso()
+    return user
+
+
+def touch_api_key(user_id: int, ip: str):
+    """Record when and from where the key was last used."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE api_keys SET last_used_at = ?, last_used_ip = ? WHERE user_id = ?",
+            (now_iso(), ip, user_id),
+        )
 
 
 # ── Scan status ────────────────────────────────────────────────────────────────

@@ -93,6 +93,7 @@ Key tables:
 - **`updates`** — append-only change log: `source`, `file_path`, `title`, `change_type` (new/modified/deleted/renamed), `detection_logic`, `spl`, `rule_url`, `detected_at`
 - **`repos`** — monitored repositories with status machine: `pending → cloning → indexing → ready / error`
 - **`scan_status`** — singleton row tracking last scan time and `is_scanning` flag
+- **`api_keys`** — one row per user with an API key: `key_hash` (SHA-256), `key_prefix`, `created_at`, `expires_at` ('' = never), `last_used_at`, `last_used_ip`
 
 `refs` is stored as newline-separated URLs. `mitre_techniques` and `mitre_tactics` are pipe-separated strings.
 
@@ -113,7 +114,15 @@ Templates branch on `row.source` to label logic correctly: `'splunk'` → "Detec
 ### Web app (`webapp/app.py`)
 - Flask-Login with bcrypt. First visit → `/setup` (create admin). No repos configured → `/setup-repos`.
 - `before_request` gate uses `_REPO_GATE_SKIP` set to allow auth/admin/health routes through before setup is complete.
-- `api_scan_status` endpoint polled every 15 s by the nav-bar scan badge (defined in `layout.html`).
+- `api_scan_status` endpoint polled every 15 s by the nav-bar scan badge (defined in `layout.html`). The `/api/scan/*`, `/api/rule-suggest`, `/api/dashboard/*` and `/api/repo-sizes` endpoints are internal (browser session auth) — distinct from the public API below.
+
+### Public API (`/api/v1`, `api_v1` blueprint in `webapp/app.py`)
+- Read-only JSON. Auth is **only** `Authorization: Bearer rr_...` — session cookies are never accepted, so CSRF doesn't apply. The blueprint skips the repo-setup gate.
+- **One key per user**, enforced by `UNIQUE(user_id)` on `api_keys`. Only `sha256(key)` is stored (plus a non-secret 11-char `key_prefix` for display); the plaintext is shown once by `settings_api_key_generate`, which renders the page directly with `Cache-Control: no-store` — never flash the key (Flask's session cookie is signed, not encrypted). Lost key → **Regenerate** (`db.replace_api_key`: delete + insert in one transaction, so two keys never coexist) or revoke → generate. Expiry chosen per key (`db.API_KEY_EXPIRY_CHOICES`: 1/7/30/90/365 days or never, default 30) and stored in `expires_at` ('' = never); `authenticate_api_key` returns `expired` and the API answers 401 "API key has expired". Expired keys stay listed until regenerated/revoked. Admins can revoke any user's key; deleting a user cascades.
+- In-memory limits: 120 req/min per key, 10 failed auths/min per IP (429 + `Retry-After`). `last_used_at`/`last_used_ip` are written at most once a minute.
+- Errors are `{"error": {"status", "message"}}`; an `HTTPException` handler returns JSON for any `/api/v1/*` path. Bad query params raise `_BadParam` → 400.
+- List endpoints reuse `db.search_detections` / `db.get_updates` (which take a `since` UTC ISO string). Keep query logic in `core/database.py` so the web pages and API share it.
+- The endpoint/parameter reference lives in the GitHub wiki (`API` page, `API_DOCS_URL` in `app.py`, linked from Settings and the README) — not in the app or README. **When an endpoint, parameter or response field changes, update the wiki page too** (wiki repo: `https://github.com/McSloats/RuleRadar.wiki.git`).
 
 ### Frontend (`webapp/templates/`)
 All CSS (~880 lines) and JS are inline in `layout.html` — no external dependencies. Templates extend `layout.html` with `{% block title %}` and `{% block content %}`.

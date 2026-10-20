@@ -205,7 +205,20 @@ docker rmi tsloats/ruleradar:latest
 | Monitored repos | Admin → Monitored Repositories | Enable any of the six built-in repos (Sigma, Splunk, Elastic, Panther, Sublime, Anvilogic) or add a custom one by pasting its GitHub URL — owner, repo, branch, and path are parsed automatically. Repos are cloned locally via git — no API token required. |
 | Discord webhook | Settings → Discord Notifications | Per-user webhook for scan summaries. Create one in Discord: Server Settings → Integrations → Webhooks. |
 | Saved filters | Settings → Saved Filters | Named presets (source, change type, title, MITRE TTP, time window) that appear as quick-access buttons on the Detections and Updates pages. |
-| Users | Admin → Users | Add users, reset passwords, grant/revoke admin, delete users. |
+| API key | Settings → API Key | One personal key per user for the read-only JSON API, with a chosen expiration (1, 7, 30, 90 days, 1 year or never). Shown once when generated; Regenerate replaces it in one step. Admins can revoke any user's key from Admin → Users. |
+| Users | Admin → Users | Add users, reset passwords, grant/revoke admin, revoke API keys, delete users. |
+
+---
+
+## API
+
+RuleRadar serves a read-only JSON API at `/api/v1` for querying rules and their change history from scripts and tools. Each user generates one personal key on **Settings → API Key**, choosing when it expires (1 day to 1 year, or never), and can regenerate or revoke it there. The key is shown only once, and RuleRadar stores only a hash of it.
+
+```bash
+curl -H "Authorization: Bearer $RULERADAR_API_KEY" "http://localhost:5000/api/v1/updates?days=7"
+```
+
+**Full reference — endpoints, parameters, response formats and examples: [API wiki page](https://github.com/McSloats/RuleRadar/wiki/API).**
 
 ---
 

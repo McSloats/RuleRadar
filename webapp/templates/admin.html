@@ -203,6 +203,7 @@
           <th>Username</th>
           <th style="width:80px;">Role</th>
           <th style="width:110px;">Discord</th>
+          <th style="width:150px;">API key</th>
           <th style="width:160px;">Created</th>
           <th>Actions</th>
         </tr>
@@ -226,6 +227,18 @@
               <span class="text-success text-small">✓ set</span>
             {% else %}
               <span class="text-muted text-small">not set</span>
+            {% endif %}
+          </td>
+          <td class="text-small">
+            {% if user.api_key_prefix and user.api_key_expires_at and user.api_key_expires_at <= now_utc %}
+              <span class="text-danger">expired</span>
+            {% elif user.api_key_prefix %}
+              <span class="text-success">✓ active</span>
+              <span class="text-muted" title="{{ user.api_key_last_used | format_dt if user.api_key_last_used else '' }}">
+                · {{ ('used ' ~ (user.api_key_last_used | relative_time)) if user.api_key_last_used else 'never used' }}
+              </span>
+            {% else %}
+              <span class="text-muted">none</span>
             {% endif %}
           </td>
           <td class="text-muted text-small nowrap">
@@ -268,6 +281,16 @@
                   </form>
                 </div>
               </details>
+
+              {% if user.api_key_prefix %}
+              <form method="post"
+                    action="{{ url_for('admin_revoke_api_key', user_id=user.id) }}"
+                    style="display:inline;"
+                    onsubmit="return confirm('Revoke the API key for {{ user.username }}?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-danger btn-sm">Revoke API key</button>
+              </form>
+              {% endif %}
 
               {% if user.id != current_user_id %}
               <form method="post"

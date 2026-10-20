@@ -4,7 +4,7 @@
 {% block title %}Settings — RuleRadar{% endblock %}
 
 {% block content %}
-{{ page_header('Settings', 'Your password, Discord notifications and saved filters.') }}
+{{ page_header('Settings', 'Your password, Discord notifications, API key and saved filters.') }}
 
 {# ═══ Repositories & Scan Status ══════════════════════════════════════════════ #}
 <div class="card">
@@ -142,6 +142,133 @@
 </div>
 
 </div>{# /card-grid #}
+
+{# ═══ API Key ═══════════════════════════════════════════════════════════════════ #}
+<div class="card" id="api-key">
+  <div class="card-title">{{ icon('key') }} API Key</div>
+  <p class="card-intro">
+    Query RuleRadar from scripts and tools with the read-only JSON API at
+    <code class="api-inline">{{ api_base_url }}</code>. You can have one key; it has the same
+    access as your account.
+    <a href="{{ api_docs_url }}" target="_blank" rel="noopener noreferrer">API documentation&nbsp;↗</a>
+  </p>
+
+  {% if new_api_key %}
+  <div class="api-key-reveal">
+    <p class="api-key-warning">
+      Copy your key now — this is the only time it will be shown. RuleRadar stores only a
+      hash of it, so it can't be recovered. If you lose it, regenerate it.
+    </p>
+    <div class="api-key-row">
+      <input type="text" id="api-key-value" class="wide api-key-value" value="{{ new_api_key }}"
+             readonly autocomplete="off" spellcheck="false" onfocus="this.select()">
+      <button type="button" class="btn btn-primary" id="api-key-copy">{{ icon('copy') }} Copy</button>
+    </div>
+  </div>
+  {% endif %}
+
+  {# Expiration dropdown, shared by Generate and Regenerate #}
+  {% macro expiry_select(form_id) -%}
+  <label class="api-expiry">
+    <span class="scan-stat-label">Expires after</span>
+    <select name="expires" form="{{ form_id }}">
+      {% for value, label in expiry_choices %}
+      <option value="{{ value }}"{% if value == default_expiry %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {%- endmacro %}
+
+  {% if api_key %}
+  <div class="api-key-meta">
+    <div><span class="scan-stat-label">Key</span><code class="api-inline">{{ api_key.key_prefix }}…</code></div>
+    <div><span class="scan-stat-label">Created</span>
+      <span title="{{ api_key.created_at | format_dt }}">{{ api_key.created_at | relative_time }}</span></div>
+    <div><span class="scan-stat-label">Expires</span>
+      {% if api_key.expired %}
+        <span class="badge badge-deleted">Expired</span>
+        <span class="text-muted text-small">{{ api_key.expires_at | format_dt }}</span>
+      {% elif api_key.expires_at %}
+        <span title="{{ api_key.expires_at | format_dt }}">{{ api_key.expires_at | format_dt('%Y-%m-%d') }}</span>
+        <span class="text-muted text-small">({{ api_key.expires_at | relative_time }})</span>
+      {% else %}
+        <span class="api-never">Never</span>
+      {% endif %}
+    </div>
+    <div><span class="scan-stat-label">Last used</span>
+      {% if api_key.last_used_at %}
+        <span title="{{ api_key.last_used_at | format_dt }}">{{ api_key.last_used_at | relative_time }}</span>
+        <span class="text-muted text-small">from {{ api_key.last_used_ip }}</span>
+      {% else %}<span class="text-muted">never</span>{% endif %}
+    </div>
+  </div>
+
+  {% if api_key.expired %}
+  <p class="flash error" style="margin-bottom:1rem;">This key has expired and no longer works. Regenerate it to keep using the API.</p>
+  {% elif not api_key.expires_at %}
+  <p class="text-muted text-small" style="margin:-0.4rem 0 1rem;">A key that never expires stays valid until you revoke it. Use an expiration unless something long-running depends on it.</p>
+  {% endif %}
+
+  <form id="api-key-regenerate" method="post" action="{{ url_for('settings_api_key_regenerate') }}"
+        onsubmit="return confirm('Regenerate your API key? The current key stops working immediately and a new one is shown once.');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  </form>
+  <form id="api-key-revoke" method="post" action="{{ url_for('settings_api_key_revoke') }}"
+        onsubmit="return confirm('Revoke your API key? Anything using it will stop working immediately.');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  </form>
+  <div class="api-key-actions">
+    {{ expiry_select('api-key-regenerate') }}
+    <button type="submit" form="api-key-regenerate" class="btn btn-primary">{{ icon('refresh') }} Regenerate Key</button>
+    <button type="submit" form="api-key-revoke" class="btn btn-danger">Revoke Key</button>
+  </div>
+  {% else %}
+  <form id="api-key-generate" method="post" action="{{ url_for('settings_api_key_generate') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  </form>
+  <div class="api-key-actions">
+    {{ expiry_select('api-key-generate') }}
+    <button type="submit" form="api-key-generate" class="btn btn-primary">Generate API Key</button>
+  </div>
+  {% endif %}
+
+</div>
+
+<style>
+.api-inline { font-family: monospace; font-size: 0.85em; background: #0a0716; border: 1px solid #2b1e4a;
+              border-radius: 4px; padding: 0.05rem 0.35rem; color: #ede8f5; }
+.api-key-reveal { background: #0a0716; border: 1px solid #d4a017; border-radius: 6px;
+                  padding: 0.9rem 1rem; margin-bottom: 1rem; }
+.api-key-warning { font-size: 0.85rem; color: #fcd34d; margin-bottom: 0.6rem; }
+.api-key-row { display: flex; gap: 0.6rem; align-items: center; }
+.api-key-row .api-key-value { font-family: monospace; flex: 1; min-width: 0; }
+.api-key-meta { display: flex; flex-wrap: wrap; gap: 0.5rem 2rem; margin-bottom: 1rem; font-size: 0.85rem; }
+.api-key-meta .scan-stat-label { display: block; margin-bottom: 0.15rem; }
+.api-key-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end; }
+.api-expiry { display: flex; flex-direction: column; gap: 0.15rem; }
+.api-expiry .scan-stat-label { margin: 0; }
+.api-never { color: #fcd34d; }
+</style>
+
+{% if new_api_key %}
+<script>
+(function () {
+  var btn = document.getElementById('api-key-copy');
+  var input = document.getElementById('api-key-value');
+  // Keep the key out of the page's back/forward history entry
+  if (window.history.replaceState) window.history.replaceState(null, '', '{{ url_for("settings") }}#api-key');
+  btn.addEventListener('click', function () {
+    var done = function () { btn.lastChild.textContent = ' Copied'; };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(input.value).then(done);
+    } else {
+      input.select(); document.execCommand('copy'); done();
+    }
+  });
+  input.focus();
+})();
+</script>
+{% endif %}
 
 {# ═══ Saved Filters ════════════════════════════════════════════════════════════ #}
 <div class="card">
