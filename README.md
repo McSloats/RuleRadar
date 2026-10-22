@@ -22,7 +22,7 @@ Every two hours RuleRadar:
 6. Sends a summary to every user who has a personal Discord webhook configured
 
 The web interface provides:
-- **Detections** — filter by title, source, MITRE TTP, and time window; every rule's full file is stored and searchable; expand a row for its description, MITRE TTPs, references, and complete file contents
+- **Detections** — filter by title, source, MITRE technique, and time window; every rule's full file is stored and searchable; expand a row for its description, MITRE techniques, references, and complete file contents
 - **Updates** — chronological feed of new, modified, deleted, and renamed rules; modified/renamed/deleted entries expand to a full colorized diff against the previous version, with a line-change count
 - **History** — search for any rule to see its current file alongside its last 5 modifications, each with a date and diff
 - **Settings** — per-user Discord webhook, saved filter presets, password change
@@ -204,7 +204,7 @@ docker rmi tsloats/ruleradar:latest
 |---------|-------|-------------|
 | Monitored repos | Admin → Monitored Repositories | Enable any of the six built-in repos (Sigma, Splunk, Elastic, Panther, Sublime, Anvilogic) or add a custom one by pasting its GitHub URL — owner, repo, branch, and path are parsed automatically. Repos are cloned locally via git — no API token required. |
 | Discord webhook | Settings → Discord Notifications | Per-user webhook for scan summaries. Create one in Discord: Server Settings → Integrations → Webhooks. |
-| Saved filters | Settings → Saved Filters | Named presets (source, change type, title, MITRE TTP, time window) that appear as quick-access buttons on the Detections and Updates pages. |
+| Saved filters | Settings → Saved Filters | Named presets (source, change type, title, MITRE technique, time window) that appear as quick-access buttons on the Detections and Updates pages. |
 | API key | Settings → API Key | One personal key per user for the read-only JSON API, with a chosen expiration (1, 7, 30, 90 days, 1 year or never). Shown once when generated; Regenerate replaces it in one step. Admins can revoke any user's key from Admin → Users. |
 | Users | Admin → Users | Add users, reset passwords, grant/revoke admin, revoke API keys, delete users. |
 

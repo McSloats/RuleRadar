@@ -1936,7 +1936,6 @@ def _api_detection(row: dict, include_raw: bool = False) -> dict:
         "status":           row.get("rule_status", ""),
         "date":             row.get("rule_date", ""),
         "mitre_techniques": _split(row.get("mitre_techniques", ""), "|"),
-        "mitre_tactics":    _split(row.get("mitre_tactics", ""), "|"),
         "references":       _split(row.get("refs", ""), "\n"),
         "detection_logic":  row.get("detection_logic", ""),
         "spl":              row.get("spl", ""),
@@ -2047,7 +2046,7 @@ def api_v1_repos():
 def api_v1_detections():
     """
     Search current rules, newest-updated first.
-    ?q=title text  &description=  &source=sigma  &mitre=T1059 or tactic
+    ?q=title text  &description=  &source=sigma  &mitre=MITRE technique ID (T1059)
     &details=keyword in logic/author/refs/raw file  &days=N  &since=ISO date
     &my_rules=true  &include_raw=true  &page=1  &per_page=50 (max 200)
     """

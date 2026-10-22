@@ -61,8 +61,8 @@
         </select>
       </div>
       <div class="filter-panel-field" style="flex:1.2; min-width:150px;">
-        <label>MITRE TTP</label>
-        <input type="text" name="mitre" value="{{ mitre }}" placeholder="e.g. T1059, Execution">
+        <label>MITRE Technique</label>
+        <input type="text" name="mitre" value="{{ mitre }}" placeholder="e.g. T1059 or T1059.001">
       </div>
       <div class="filter-panel-field" style="flex:2; min-width:180px;">
         <label>Description</label>
@@ -156,7 +156,7 @@
         </th>
         <th style="width:22px;"></th>
         <th>Title</th>
-        <th style="width:175px;">MITRE TTPs</th>
+        <th style="width:175px;">MITRE Techniques</th>
         <th style="width:140px;">Date</th>
         <th style="width:160px;">Actions</th>
       </tr>
@@ -208,7 +208,7 @@
 
       {# ── Expandable detail row ──────────────────────────────────────────────
          Uniform format for every rule, native or custom:
-         Description → MITRE TTPs → References → full file contents → change count.
+         Description → MITRE techniques → References → full file contents → change count.
       #}
       <tr class="detail-row">
         <td colspan="6">
@@ -219,10 +219,10 @@
             {{ row.description or 'No description available.' }}
           </p>
 
-          {# MITRE TTPs — regex-matched directly against the raw rule file,
+          {# MITRE techniques — regex-matched directly against the raw rule file,
              the same way for every source (native or custom) rather than
              relying on each format's own tagging schema. #}
-          <p class="detail-label" style="margin-top:0.6rem;">MITRE TTPs</p>
+          <p class="detail-label" style="margin-top:0.6rem;">MITRE Techniques</p>
           {% if row.mitre_techniques %}
             <div class="detail-mitre">
               {% for tech in row.mitre_techniques.split('|') %}

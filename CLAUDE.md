@@ -91,25 +91,27 @@ All clones live at `REPOS_DIR = db.DB_PATH.parent / "repos"` (i.e. `/app/data/re
 
 ### Database schema (`core/database.py`)
 Key tables:
-- **`detections`** — current state of every known rule: `source`, `file_path`, `title`, `description`, `detection_logic`, `spl`, `author`, `rule_status`, `rule_date`, `refs`, `mitre_techniques`, `mitre_tactics`, `rule_url`
+- **`detections`** — current state of every known rule: `source`, `file_path`, `title`, `description`, `detection_logic`, `spl`, `author`, `rule_status`, `rule_date`, `refs`, `mitre_techniques`, `rule_url` (a `mitre_tactics` column also exists but is never populated — don't surface it)
 - **`updates`** — append-only change log: `source`, `file_path`, `title`, `change_type` (new/modified/deleted/renamed), `detection_logic`, `spl`, `rule_url`, `detected_at`
 - **`repos`** — monitored repositories with status machine: `pending → cloning → indexing → ready / error`
 - **`scan_status`** — singleton row tracking last scan time and `is_scanning` flag
 - **`api_keys`** — one row per user with an API key: `key_hash` (SHA-256), `key_prefix`, `created_at`, `expires_at` ('' = never), `last_used_at`, `last_used_ip`
 
-`refs` is stored as newline-separated URLs. `mitre_techniques` and `mitre_tactics` are pipe-separated strings.
+`refs` is stored as newline-separated URLs. `mitre_techniques` is a pipe-separated string of ATT&CK technique IDs (`T1059|T1059.001`).
+
+**MITRE:** every parser fills `mitre_techniques` the same way — `extract_mitre_techniques()` regex-scans the raw file for `T####` / `T####.###` IDs, regardless of the source's own schema. RuleRadar tracks **techniques only, not tactics**: UI labels say "MITRE Technique(s)", the `mitre` filter (web and API) matches technique IDs only, and the API has no tactics field.
 
 `get_updates()` LEFT JOINs `detections` to enrich rows with `author`, `rule_status`, `rule_date`, `description`, `refs` — these are not stored in `updates` itself.
 
 Schema migrations live in `_migrate_schema()` using try/except ALTER TABLE (idempotent).
 
 ### Parser differences
-- **Sigma** (`_process_sigma`): `detection_logic` = the YAML `detection:` block; `spl` = "" (empty — SPL auto-translation was removed)
+- **Sigma** (`_process_sigma`): `detection_logic` = the YAML `detection:` block (first 600 chars); `spl` = "" (empty — SPL auto-translation was removed)
 - **Splunk** (`_process_splunk`): `detection_logic` = "" (empty); `spl` = the `search:` field
-- **Elastic** (`_process_elastic`): parses TOML rule files (`.toml`) via `tomllib` (Python 3.11+ stdlib) or `tomli` backport; `detection_logic` = `[EQL]\nquery` (or `[KQL]`/`[ES|QL]` depending on `rule.type`); `spl` = "" (empty — SPL auto-translation was removed)
-- **Panther** (`_process_panther`): YAML rules from `panther-labs/panther-analysis` (`rules/`). Only files with `AnalysisType: rule` are indexed (policies, scheduled_rules, data_models are skipped — parser returns `None`). Title = `DisplayName`, ID = `RuleID`, severity = `Severity`. MITRE from `Reports.MITRE ATT&CK` list in `TA####:T####` format; `MITRE_TACTIC_IDS` dict maps tactic IDs to names. Detection logic is Python in a separate `.py` file — `detection_logic` and `spl` are both empty.
-- **Sublime** (`_process_sublime`): YAML rules from `sublime-security/sublime-rules` (`detection-rules/`). Email detection rules using MQL (Message Query Language). `detection_logic` = `source` field (MQL expression); `spl` = empty. `tactics_and_techniques` (Sublime's own classification, not standard MITRE T-numbers) is stored as `mitre_tactics`; `mitre_techniques` is always empty.
-- **Anvilogic** (`_process_anvilogic`): YAML rules from `anvilogic-forge/armory` (`detections/`). Detections live inside per-detection directories; each YAML is a platform variant. `logic_format` is `"Splunk"` or `"snowflake"` (case varies). For Splunk: `detection_logic` = "", `spl` = `logic` field. For others: `detection_logic` = `[format]\nlogic`, `spl` = "". MITRE techniques from `technique_id` list (T-numbers); tactics extracted from first segment of `techniques` slugs (e.g. `"defense-evasion:..."` → "Defense Evasion").
+- **Elastic** (`_process_elastic`): parses TOML rule files (`.toml`) via `tomllib` (Python 3.11+ stdlib) or `tomli` backport; `detection_logic` = `[<LANGUAGE>]\nquery`, labelled with `rule.language` upper-cased: `[EQL]`, `[KUERY]` (KQL), `[ESQL]`, `[LUCENE]`, or no label when the rule has no language (e.g. machine-learning rules); `spl` = "" (empty — SPL auto-translation was removed)
+- **Panther** (`_process_panther`): YAML rules from `panther-labs/panther-analysis` (`rules/`). Only files with `AnalysisType: rule` are indexed (policies, scheduled_rules, data_models are skipped — parser returns `None`). Title = `DisplayName`, ID = `RuleID`, `rule_status` = `Severity`. Detection logic is Python in a separate `.py` file — `detection_logic` and `spl` are both empty.
+- **Sublime** (`_process_sublime`): YAML rules from `sublime-security/sublime-rules` (`detection-rules/`). Email detection rules using MQL (Message Query Language). `detection_logic` = `source` field (MQL expression); `spl` = empty; `rule_status` = `severity`. Sublime's `tactics_and_techniques` is its own taxonomy, not ATT&CK IDs, and isn't stored, so almost no Sublime rules have techniques.
+- **Anvilogic** (`_process_anvilogic`): YAML rules from `anvilogic-forge/armory` (`detections/`). Detections live inside per-detection directories; each YAML is a platform variant. `logic_format` is `"Splunk"` or `"snowflake"` (case varies). For Splunk: `detection_logic` = "", `spl` = `logic` field. For others: `detection_logic` = `[format]\nlogic`, `spl` = "".
 
 Templates branch on `row.source` to label logic correctly: `'splunk'` → "Detection Logic (SPL)", `'elastic'` → "Detection Logic (EQL / KQL)", otherwise plain "Detection Logic".
 

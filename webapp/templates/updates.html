@@ -243,7 +243,7 @@
             {{ row.description or 'No description available.' }}
           </p>
 
-          <p class="detail-label" style="margin-top:0.6rem;">MITRE TTPs</p>
+          <p class="detail-label" style="margin-top:0.6rem;">MITRE Techniques</p>
           {% if row.mitre_techniques %}
             <div class="detail-mitre">
               {% for tech in row.mitre_techniques.split('|') %}

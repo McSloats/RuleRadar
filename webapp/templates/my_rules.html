@@ -44,7 +44,7 @@
         </th>
         <th style="width:22px;"></th>
         <th>Title</th>
-        <th style="width:175px;">MITRE TTPs</th>
+        <th style="width:175px;">MITRE Techniques</th>
         <th style="width:140px;">Date</th>
         <th style="width:150px;">Actions</th>
       </tr>
@@ -100,7 +100,7 @@
             {{ row.description or 'No description available.' }}
           </p>
 
-          <p class="detail-label" style="margin-top:0.6rem;">MITRE TTPs</p>
+          <p class="detail-label" style="margin-top:0.6rem;">MITRE Techniques</p>
           {% if row.mitre_techniques %}
             <div class="detail-mitre">
               {% for tech in row.mitre_techniques.split('|') %}

@@ -557,7 +557,7 @@ def _process_sublime(source: str, rel_path: str, text: str, rule_url: str) -> tu
 
     Sublime rules are email-focused and use MQL; tactics_and_techniques is
     Sublime's own taxonomy, not standard T-numbers, so it isn't used for
-    MITRE TTPs — extract_mitre_techniques() regex-scans the raw file instead,
+    MITRE techniques — extract_mitre_techniques() regex-scans the raw file instead,
     same as every other source.
     """
     meta = parse_yaml(text)

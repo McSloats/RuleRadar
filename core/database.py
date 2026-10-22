@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS detections (
     first_seen       TEXT    NOT NULL,
     last_updated     TEXT    NOT NULL,
     mitre_techniques TEXT    NOT NULL DEFAULT '',
-    mitre_tactics    TEXT    NOT NULL DEFAULT '',
+    mitre_tactics    TEXT    NOT NULL DEFAULT '',   -- unused (never populated); kept so existing databases need no migration
     author           TEXT    NOT NULL DEFAULT '',
     rule_status      TEXT    NOT NULL DEFAULT '',
     rule_date        TEXT    NOT NULL DEFAULT '',
@@ -778,7 +778,6 @@ def upsert_detection(
     rule_url: str,
     *,
     mitre_techniques: str = "",
-    mitre_tactics: str = "",
     author: str = "",
     rule_status: str = "",
     rule_date: str = "",
@@ -804,7 +803,7 @@ def upsert_detection(
     with get_conn() as conn:
         existing = conn.execute(
             """SELECT title, description, detection_logic, spl, mitre_techniques,
-                      mitre_tactics, author, rule_status, rule_date, refs,
+                      author, rule_status, rule_date, refs,
                       rule_id, raw_content, last_updated
                FROM detections WHERE source = ? AND file_path = ?""",
             (source, file_path),
@@ -816,7 +815,6 @@ def upsert_detection(
                 or existing["detection_logic"]  != detection_logic
                 or existing["spl"]              != spl
                 or existing["mitre_techniques"] != mitre_techniques
-                or existing["mitre_tactics"]    != mitre_tactics
                 or existing["author"]           != author
                 or existing["rule_status"]      != rule_status
                 or existing["rule_date"]        != rule_date
@@ -829,13 +827,13 @@ def upsert_detection(
                 """UPDATE detections
                    SET title=?, description=?, detection_logic=?, spl=?,
                        rule_url=?, last_updated=?,
-                       mitre_techniques=?, mitre_tactics=?,
+                       mitre_techniques=?,
                        author=?, rule_status=?, rule_date=?, refs=?, rule_id=?,
                        raw_content=?
                    WHERE source=? AND file_path=?""",
                 (
                     title, description, detection_logic, spl, rule_url, new_last_updated,
-                    mitre_techniques, mitre_tactics,
+                    mitre_techniques,
                     author, rule_status, rule_date, refs, rule_id,
                     raw_content,
                     source, file_path,
@@ -846,13 +844,13 @@ def upsert_detection(
             """INSERT INTO detections
                (source, file_path, title, description, detection_logic, spl,
                 rule_url, first_seen, last_updated,
-                mitre_techniques, mitre_tactics,
+                mitre_techniques,
                 author, rule_status, rule_date, refs, rule_id, raw_content)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,  ?, ?,  ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,  ?,  ?, ?, ?, ?, ?, ?)""",
             (
                 source, file_path, title, description, detection_logic, spl,
                 rule_url, ts, ts,
-                mitre_techniques, mitre_tactics,
+                mitre_techniques,
                 author, rule_status, rule_date, refs, rule_id, raw_content,
             ),
         )
@@ -923,7 +921,7 @@ def search_detections(
     - title            : searches title only
     - description      : searches description only
     - source           : 'sigma' | 'splunk' | 'elastic' | '' (all)
-    - mitre            : searches mitre_techniques and mitre_tactics
+    - mitre            : MITRE ATT&CK technique ID, substring match on mitre_techniques (e.g. T1059 also matches T1059.001)
     - days             : '7'|'30'|'90'|'' — limit to rules updated in the last N days
     - details_q        : keyword across detection_logic, spl, author, rule_status, rule_date, refs, raw_content
     - user_filter_rows : if set, only return rules matching at least one filter row
@@ -941,9 +939,8 @@ def search_detections(
         conditions.append("source = ?")
         params.append(source)
     if mitre:
-        conditions.append("(mitre_techniques LIKE ? OR mitre_tactics LIKE ?)")
-        like = f"%{mitre}%"
-        params += [like, like]
+        conditions.append("mitre_techniques LIKE ?")
+        params.append(f"%{mitre}%")
     if days:
         try:
             cutoff = (
