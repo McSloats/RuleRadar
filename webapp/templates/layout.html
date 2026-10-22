@@ -1231,8 +1231,12 @@ function clearSelection() {
 const _csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 
 /* Favorite one rule into My Rules (Detections/Updates row "⊕" button) */
-async function addToFilter(btn, ruleId, title, source) {
+// The rule's values come from data-* attributes (HTML-escaped by Jinja), never
+// from JavaScript string literals in the onclick handler: rule ids and titles
+// come from third-party repos, and quoting them into JS allowed script injection.
+async function addToFilter(btn) {
   btn.disabled = true;
+  const {ruleId, title, source} = btn.dataset;
   try {
     const resp = await fetch('/settings/rule-filter/add', {
       method:  'POST',

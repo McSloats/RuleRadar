@@ -318,8 +318,13 @@ def git_run(args: list[str], cwd: str | None = None, timeout: int = 600) -> tupl
     timeout : seconds to wait before killing the process (default 10 min).
     """
     try:
+        # core.symlinks=false: a symlink in a monitored repo is checked out as
+        # a small text file holding the link target, never as a real link, so
+        # a malicious repo can't point RuleRadar at files outside its clone
+        # (e.g. the database or .secret_key). _is_inside_repo() is the second
+        # line of defence for clones made before this setting.
         result = subprocess.run(
-            ["git"] + args,
+            ["git", "-c", "core.symlinks=false"] + args,
             cwd=cwd,
             capture_output=True,
             text=True,
@@ -333,6 +338,19 @@ def git_run(args: list[str], cwd: str | None = None, timeout: int = 600) -> tupl
         return 1, "git not found — ensure git is installed"
     except Exception as e:
         return 1, str(e)
+
+
+def _is_inside_repo(repo_root: Path, path: Path) -> bool:
+    """True if `path` is a regular file (not a symlink) whose real location is
+    inside `repo_root`. Rule files are read and their contents shown to every
+    user, so anything that resolves elsewhere — a symlink to /app/data/.secret_key,
+    or a file under a symlinked directory — must never be read."""
+    try:
+        if path.is_symlink() or not path.is_file():
+            return False
+        return path.resolve().is_relative_to(repo_root.resolve())
+    except OSError:
+        return False
 
 
 # ── File-level parsers ─────────────────────────────────────────────────────────
@@ -697,6 +715,11 @@ def index_repo(repo_cfg: dict) -> int:
         if not rule_dir.exists():
             print(f"  [{name}] Path not found: {rule_dir}", file=sys.stderr)
             continue
+        # A monitored path that is itself a symlink (os.walk would follow it)
+        # or resolves outside the clone is skipped entirely
+        if rule_dir.is_symlink() or not rule_dir.resolve().is_relative_to(local_path.resolve()):
+            print(f"  [{name}] Skipping {sub_path}: resolves outside the repository", file=sys.stderr)
+            continue
 
         for dirpath, _, filenames in os.walk(str(rule_dir)):
             for fname in filenames:
@@ -709,6 +732,9 @@ def index_repo(repo_cfg: dict) -> int:
                         continue
                 full = Path(dirpath) / fname
                 rel  = str(full.relative_to(local_path)).replace("\\", "/")
+                if not _is_inside_repo(local_path, full):
+                    print(f"  [{name}] Skipping {rel}: symlink or outside the repository", file=sys.stderr)
+                    continue
                 rule_url = f"https://github.com/{owner}/{repo}/blob/{branch}/{rel}"
 
                 try:
@@ -911,6 +937,9 @@ def sync_repo(repo_cfg: dict) -> tuple[int, int, list[tuple[str, str]]]:
 
             full = local / target_fp
             if not full.exists():
+                continue
+            if not _is_inside_repo(local, full):
+                print(f"  [{name}] Skipping {target_fp}: symlink or outside the repository", file=sys.stderr)
                 continue
 
             try:

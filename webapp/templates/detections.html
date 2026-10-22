@@ -199,7 +199,8 @@
           {% endif %}
           <button class="btn btn-sm filter-btn {% if is_filtered %}filter-btn-active{% endif %}"
                   {% if is_filtered %}disabled{% endif %}
-                  onclick="addToFilter(this, '{{ row.rule_id }}', '{{ row.title | replace("'", "\\'") }}', '{{ row.source }}')">
+                  data-rule-id="{{ row.rule_id }}" data-title="{{ row.title }}" data-source="{{ row.source }}"
+                  onclick="addToFilter(this)">
             {{ '✓' if is_filtered else '⊕' }}
           </button>
         </td>
