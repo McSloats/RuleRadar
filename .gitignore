@@ -18,6 +18,10 @@ config.json
 
 # Logs
 monitor_log.txt
+*.log
+
+# Claude Code per-machine settings (local permissions; never commit)
+.claude/settings.local.json
 
 # Design assets (not needed in production)
 logo_concepts/

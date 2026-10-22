@@ -5,10 +5,11 @@
 # Virtual environment
 .venv/
 
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
+# Python cache (**/ so it matches in every directory — .dockerignore
+# patterns, unlike .gitignore, only match at the top level otherwise)
+**/__pycache__/
+**/*.pyc
+**/*.pyo
 
 # Runtime / generated files (stored in the named volume at runtime)
 ruleradar.db
@@ -20,3 +21,13 @@ repos/
 
 # config.json is no longer used — settings live in the database
 config.json
+
+# Not needed at runtime — keep the image to what the app runs
+# (LICENSE stays so the license ships with the software)
+.claude/
+CLAUDE.md
+README.md
+docs/
+Dockerfile
+.dockerignore
+docker-compose.yml

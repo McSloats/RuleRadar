@@ -40,30 +40,12 @@ The Dockerfile `CMD` runs `start.py`, which launches the web app (under gunicorn
 ### Database path
 Controlled by env var `RULERADAR_DB` (defaults to `./ruleradar.db`). In Docker it is `/app/data/ruleradar.db` — must be set via environment variable or the DB writes to `/app/ruleradar.db` inside the container (not persisted).
 
-## TrueNAS SCALE Deployment
+## Deployment notes
 
-Deployed as a single custom app. Docker image: `tsloats/ruleradar:latest`.
-
-| Setting | Value |
-|---|---|
-| Image | `tsloats/ruleradar:latest` |
-| Host port → Container port | `5000:5000` |
-| Environment: `RULERADAR_DB` | `/app/data/ruleradar.db` |
-| Environment: `PYTHONUNBUFFERED` | `1` |
-| Mount type | Host Path |
-| Host path | `/mnt/Storage/RuleRadar` |
-| Mount path (container) | `/app/data` |
-| Restart policy | Unless Stopped |
-
-**Dataset permissions:** Owner and group must be set to `apps:apps` (UID/GID 568) with Read/Write/Execute. TrueNAS runs custom app containers under the `apps` user — if the dataset is owned by `root`, the container cannot write the database or clone repos.
-
-**No command override needed** — the Dockerfile default (`start.py`) runs both web and scheduler automatically.
-
-**Verify mount is working** after deploy:
-```bash
-sudo docker exec ix-ruleradar-ruleradar-1 ls -la /app/data/
-# Should show ruleradar.db, .secret_key, repos/
-```
+- The image needs only `RULERADAR_DB=/app/data/ruleradar.db` (plus `PYTHONUNBUFFERED=1` for live logs) and a persistent volume or host folder mounted at `/app/data`. No command override is needed — the default `start.py` runs web + scheduler.
+- The container runs as UID/GID 568 (`ruleradar`). A bind-mounted host folder must be writable by that UID/GID, or the app can't write the database or clone repos. Named Docker volumes get the right ownership automatically.
+- After deploying, `/app/data` should contain `ruleradar.db`, `.secret_key` and `repos/`.
+- **Never commit details of a specific deployment** (host names or paths, NAS/container names, LAN IPs, tunnel setup) to this public repo, the wiki or the image.
 
 ## Architecture
 
@@ -71,7 +53,7 @@ sudo docker exec ix-ruleradar-ruleradar-1 ls -la /app/data/
 Two processes share one SQLite database (WAL mode):
 - **`webapp/app.py`** — Flask web app; never triggers scans automatically. `start.py` serves it with **gunicorn** (`webapp/gunicorn.conf.py`); `python3 webapp/app.py` runs Flask's dev server for debugging, and `start.py` falls back to it on Windows (no gunicorn).
   - Gunicorn runs **1 worker process, gthread, 8 threads — keep `workers = 1`**: the API and login rate limiters are in-process memory (more workers multiply the limits) and the initial setup scan runs in a web-process thread (don't set `max_requests`).
-  - gthread has no slow-header timeout, so 8 stalled connections can block it. That's acceptable only because production sits behind a Cloudflare Tunnel, which buffers client requests; don't expose gunicorn's port directly to the internet.
+  - gthread has no slow-header timeout, so 8 stalled connections can block it. That's acceptable only behind a reverse proxy or tunnel that buffers client requests; never expose gunicorn's port directly to the internet.
 - **`core/scheduler.py`** — fires `ruleradar.run_scan()` at every even UTC hour via APScheduler `CronTrigger(hour="*/2")`. Has a 90-minute staleness guard to skip if a scan completed recently.
 
 The initial scan is always triggered by an admin on `/setup-repos`, which calls `_start_background_scan()` (daemon thread in the web process).
